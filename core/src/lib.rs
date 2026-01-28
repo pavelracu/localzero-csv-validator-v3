@@ -1,13 +1,12 @@
 use wasm_bindgen::prelude::*;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
-use engine::schema::{ColumnType, ColumnSchema};
-use engine::dataframe::DataFrame;
+use std::collections::HashMap;
 
 mod engine;
-mod rules; // Assuming rules existed before, or I should comment it out if not needed.
-// The file listing showed 'rules' directory.
+use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}};
 
+// GLOBAL STATE (The "Database" in Memory)
 lazy_static! {
     static ref DATASET: Mutex<Option<DataFrame>> = Mutex::new(None);
 }
@@ -16,121 +15,157 @@ lazy_static! {
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
+
+    #[wasm_bindgen(js_namespace = console)]
+    fn time(s: &str);
+
+    #[wasm_bindgen(js_namespace = console)]
+    fn timeEnd(s: &str);
 }
 
-#[wasm_bindgen]
+#[derive(serde::Serialize)]
 pub struct DatasetSummary {
     pub row_count: usize,
+    #[serde(rename = "schema")]
+    pub columns: Vec<ColumnSchema>,
     pub file_size_mb: f64,
-    schema: JsValue,
 }
 
 #[wasm_bindgen]
-impl DatasetSummary {
-    #[wasm_bindgen(getter)]
-    pub fn schema(&self) -> JsValue {
-        self.schema.clone()
-    }
-}
+pub fn load_dataset(data: &[u8]) -> Result<JsValue, JsValue> {
+    log(&format!("🚀 Parsing {} bytes...", data.len()));
 
-#[wasm_bindgen]
-pub fn load_dataset(data: &[u8]) -> Result<DatasetSummary, JsValue> {
-    let size_mb = data.len() as f64 / 1_024.0 / 1_024.0;
-    log(&format!("🚀 Rust received {} bytes ({:.2} MB)", data.len(), size_mb));
-
-    match engine::parser::parse_csv(data) {
+    // 1. Parse and Infer
+    time("Rust: parse_csv");
+    match parse_csv(data) {
         Ok(df) => {
-            let row_count = df.rows_count();
-            let schema_val = serde_wasm_bindgen::to_value(&df.schema)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            timeEnd("Rust: parse_csv");
+            let summary = DatasetSummary {
+                row_count: df.rows,
+                columns: df.columns.clone(),
+                file_size_mb: data.len() as f64 / 1_048_576.0,
+            };
 
-            let mut global_df = DATASET.lock().map_err(|_| JsValue::from_str("Failed to lock dataset"))?;
-            *global_df = Some(df);
+            // 2. Store in Global Mutex
+            let mut store = DATASET.lock().unwrap();
+            *store = Some(df);
 
-            Ok(DatasetSummary {
-                row_count,
-                file_size_mb: size_mb,
-                schema: schema_val,
-            })
+            // 3. Return Summary to JS
+            Ok(serde_wasm_bindgen::to_value(&summary)?)
         },
         Err(e) => {
-            log(&format!("Error parsing CSV: {}", e));
-            Err(JsValue::from_str(&format!("Parsing error: {}", e)))
+            timeEnd("Rust: parse_csv");
+            Err(JsValue::from_str(&format!("Parse error: {}", e)))
         }
     }
 }
 
+// NEW: Fetch a slice of rows for the Virtual Table
 #[wasm_bindgen]
-pub fn get_rows(start: usize, count: usize) -> Result<JsValue, JsValue> {
-    let global_df = DATASET.lock().map_err(|_| JsValue::from_str("Failed to lock dataset"))?;
-    
-    if let Some(df) = &*global_df {
-        let end = std::cmp::min(start + count, df.records.len());
-        if start >= df.records.len() {
-             return Ok(serde_wasm_bindgen::to_value(&Vec::<Vec<String>>::new()).unwrap());
-        }
+pub fn get_rows(start: usize, limit: usize) -> Result<JsValue, JsValue> {
+    let store = DATASET.lock().unwrap();
+    if let Some(df) = &*store {
+        let end = std::cmp::min(start + limit, df.rows);
+        let mut result = Vec::new();
 
-        let slice = &df.records[start..end];
-        // Convert to Vec<Vec<String>> or Vec<Object>
-        // Let's return Vec<Vec<String>> (array of arrays) for simplicity/speed
-        // Or better, Vec<Object> (key-value) if the table expects it.
-        // TanStack table usually wants objects, but array of arrays is fine if mapped.
-        // Let's do Array of Arrays for raw speed and simplicity here.
-        
-        // Wait, VirtualizedTable needs to know which index is which column.
-        // Array of arrays is safest.
-        
-        let mut result = Vec::with_capacity(end - start);
-        for record in slice {
-            let row: Vec<String> = record.iter().map(|s| s.to_string()).collect();
-            result.push(row);
+        // Build array of objects for JS: [{ "id": "1", "name": "Alice" }, ...]
+        for i in start..end {
+            // Use get_row helper which handles raw data + patches
+            if let Some(row_vec) = df.get_row(i) {
+                // Map column names to values
+                let mut row_obj = serde_json::Map::new();
+                for (col_idx, val) in row_vec.iter().enumerate() {
+                    let col_name = &df.columns[col_idx].name;
+                    row_obj.insert(col_name.clone(), serde_json::Value::String(val.clone()));
+                }
+                result.push(serde_json::Value::Object(row_obj));
+            }
+        }
+        Ok(serde_wasm_bindgen::to_value(&result)?)
+    } else {
+        Ok(JsValue::NULL)
+    }
+}
+
+#[wasm_bindgen]
+pub fn validate_chunk(start_row: usize, limit: usize) -> Result<JsValue, JsValue> {
+    let store = DATASET.lock().unwrap();
+    if let Some(df) = &*store {
+        let end = std::cmp::min(start_row + limit, df.rows);
+        // Map<ColIndex, Vec<RowIndex>>
+        let mut col_errors: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        for row_idx in start_row..end {
+            for col_idx in 0..df.columns.len() {
+                 if let Some(val) = df.get_cell(row_idx, col_idx) {
+                     let col_type = &df.columns[col_idx].detected_type;
+                     if !col_type.is_valid(&val) {
+                         col_errors.entry(col_idx).or_insert_with(Vec::new).push(row_idx);
+                     }
+                 }
+            }
         }
         
-        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+        Ok(serde_wasm_bindgen::to_value(&col_errors)?)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
     }
 }
 
 #[wasm_bindgen]
-pub fn validate_column(col_index: usize, new_type_str: &str) -> Result<Vec<usize>, JsValue> {
-    // Parse new_type string to ColumnType
-    // We need to implement FromStr or just match string
-    let new_type = match new_type_str {
-        "Text" => ColumnType::Text,
-        "Integer" => ColumnType::Integer,
-        "Float" => ColumnType::Float,
-        "Boolean" => ColumnType::Boolean,
-        "Email" => ColumnType::Email,
-        "PhoneUS" => ColumnType::PhoneUS,
-        "Date" => ColumnType::Date,
-        _ => return Err(JsValue::from_str("Invalid column type")),
-    };
+pub fn update_cell(row_idx: usize, col_idx: usize, value: String) -> Result<bool, JsValue> {
+    let mut store = DATASET.lock().unwrap();
+    if let Some(df) = store.as_mut() {
+        // 1. Update Patch
+        df.patches
+            .entry(row_idx)
+            .or_insert_with(HashMap::new)
+            .insert(col_idx, value.clone());
+            
+        // 2. Validate
+        let col_type = &df.columns[col_idx].detected_type;
+        let is_valid = col_type.is_valid(&value);
+        
+        Ok(is_valid)
+    } else {
+         Err(JsValue::from_str("No dataset loaded"))
+    }
+}
 
-    let mut global_df = DATASET.lock().map_err(|_| JsValue::from_str("Failed to lock dataset"))?;
+#[wasm_bindgen]
+pub fn validate_column(col_idx: usize, type_name: &str) -> Result<Vec<usize>, JsValue> {
+    let mut store = DATASET.lock().unwrap();
     
-    if let Some(df) = &mut *global_df {
-        if col_index >= df.schema.len() {
-            return Err(JsValue::from_str("Column index out of bounds"));
-        }
+    if let Some(df) = store.as_mut() {
+        // 1. Map the string from JS ("Integer") to our Rust Enum
+        let new_type = match type_name {
+            "Text" => ColumnType::Text,
+            "Integer" => ColumnType::Integer,
+            "Float" => ColumnType::Float,
+            "Boolean" => ColumnType::Boolean,
+            "Email" => ColumnType::Email,
+            "PhoneUS" => ColumnType::PhoneUS,
+            "Date" => ColumnType::Date,
+            _ => return Err(JsValue::from_str(&format!("Unknown type: {}", type_name))),
+        };
 
-        // Update schema
-        df.schema[col_index].detected_type = new_type;
+        // 2. Update the Schema in Memory
+        df.set_column_type(col_idx, new_type);
 
-        // Validate
-        let mut invalid_rows = Vec::new();
-        for (row_idx, record) in df.records.iter().enumerate() {
-            if let Some(val) = record.get(col_index) {
-                // Skip empty values? The is_valid implementation assumes empty is valid.
-                // If we want to enforce required, that's a separate rule.
-                if !new_type.is_valid(val) {
-                    invalid_rows.push(row_idx);
+        // 3. Scan the column and find invalid rows
+        let mut error_indices = Vec::new();
+        
+        // Iterate over all rows (lazy scan)
+        for row_idx in 0..df.rows {
+            if let Some(val) = df.get_cell(row_idx, col_idx) {
+                if !new_type.is_valid(&val) {
+                    error_indices.push(row_idx);
                 }
             }
         }
         
-        // Return indices as Uint32Array or similar? Vec<usize> converts to array.
-        Ok(invalid_rows)
+        // Return the list of Row IDs that failed
+        Ok(error_indices)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
     }

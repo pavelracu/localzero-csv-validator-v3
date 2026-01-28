@@ -1,138 +1,161 @@
-import { useEffect, useState, useCallback } from 'react';
-import init, { load_dataset, get_rows, validate_column } from './wasm/localzero_core';
+import { useState, useCallback } from 'react';
+import { useDataStream } from './hooks/useDataStream';
 import { VirtualizedTable } from './components/grid/VirtualizedTable';
-import { ColumnSchema, ColumnType } from './types';
+import { Upload, FileType, CheckCircle, AlertTriangle } from 'lucide-react';
 
 function App() {
-  const [isReady, setIsReady] = useState(false);
-  const [schema, setSchema] = useState<ColumnSchema[]>([]);
-  const [data, setData] = useState<string[][]>([]);
-  const [errors, setErrors] = useState<Map<number, Set<number>>>(new Map());
-  const [summary, setSummary] = useState<{ row_count: number; file_size_mb: number } | null>(null);
+  const { 
+    isReady, 
+    schema, 
+    rowCount, 
+    errors, 
+    loadFile, 
+    fetchRows, 
+    updateColumnType,
+    getRow
+  } = useDataStream();
 
-  useEffect(() => {
-    const bootWasm = async () => {
-      try {
-        await init();
-        setIsReady(true);
-        console.log("✅ Wasm Initialized");
-      } catch (err) {
-        console.error("Failed to load Wasm:", err);
-      }
-    };
-    bootWasm();
+  const [isDragging, setIsDragging] = useState(false);
+  const [loadingFile, setLoadingFile] = useState(false);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
   }, []);
 
-  const handleTestClick = async () => {
-    if (!isReady) return;
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
 
-    // Create a dummy CSV with mixed types
-    const csvContent = 
-`id,name,email,score,active,joined,phone
-1,Alice,alice@example.com,95.5,true,2023-01-01,1234567890
-2,Bob,bob@invalid,80.0,false,2023-05-12,987-654-3210
-3,Charlie,charlie@example.com,invalid_score,yes,2023-13-01,5551234567
-4,Dave,dave@example.com,100,1,2023-06-20,1234567890
-5,Eve,eve@example.com,45.2,0,not-a-date,1112223333`;
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
 
-    const encoded = new TextEncoder().encode(csvContent);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      await processFile(files[0]);
+    }
+  }, [loadFile]);
 
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      await processFile(e.target.files[0]);
+    }
+  }, [loadFile]);
+
+  const processFile = async (file: File) => {
+    setLoadingFile(true);
     try {
-      // 1. Load Dataset
-      const result = load_dataset(encoded);
-      const schemaFromWasm = result.schema as ColumnSchema[];
-      
-      setSummary({
-        row_count: result.row_count,
-        file_size_mb: result.file_size_mb
-      });
-      setSchema(schemaFromWasm);
-      
-      // 2. Fetch Data (all of it for now)
-      const rows = get_rows(0, 100) as string[][];
-      setData(rows);
-      
-      // Reset errors
-      setErrors(new Map());
-
-      console.log("Loaded schema:", schemaFromWasm);
-    } catch (e) {
-      console.error("Rust Error:", e);
+      console.log("Loading file:", file.name);
+      await loadFile(file);
+      console.log("File loaded successfully");
+    } catch (err) {
+      console.error("Error loading file:", err);
+      alert("Failed to parse CSV file.");
+    } finally {
+      setLoadingFile(false);
     }
   };
 
-  const handleTypeChange = useCallback(async (colIndex: number, newType: ColumnType) => {
-    if (!isReady) return;
-
-    console.log(`Changing column ${colIndex} to ${newType}`);
-
-    try {
-      // 1. Update Schema locally to reflect change immediately in UI
-      setSchema(prev => {
-        const next = [...prev];
-        next[colIndex] = { ...next[colIndex], detected_type: newType };
-        return next;
-      });
-
-      // 2. Call Rust to validate
-      const invalidRows = validate_column(colIndex, newType) as Uint32Array | number[]; // Vec<usize> comes as array
-      
-      // 3. Update Errors Map
-      setErrors(prev => {
-        const next = new Map(prev);
-        const errorSet = new Set(invalidRows);
-        
-        if (errorSet.size > 0) {
-            next.set(colIndex, errorSet);
-        } else {
-            next.delete(colIndex);
-        }
-        return next;
-      });
-      
-    } catch (e) {
-      console.error("Validation Error:", e);
-    }
-  }, [isReady]);
-
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start p-8 font-sans">
-      <div className="w-full max-w-6xl space-y-6">
+      <div className="w-full max-w-[1600px] space-y-6">
+        
+        {/* Header */}
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">LocalZero Schema Engine</h1>
-          <div className="flex items-center gap-4">
-             <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                isReady ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">LocalZero Schema Engine</h1>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wide border ${
+                isReady 
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                  : 'bg-amber-50 text-amber-700 border-amber-200'
               }`}>
-                {isReady ? 'WASM READY' : 'LOADING...'}
-              </span>
-              <button
-                onClick={handleTestClick}
-                disabled={!isReady}
-                className="bg-black text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 transition-all"
-              >
-                Load Test Data
-              </button>
+                {isReady ? 'WASM READY' : 'INITIALIZING...'}
+            </span>
           </div>
+          
+          {rowCount > 0 && (
+             <div className="flex items-center gap-6 text-sm text-gray-600 bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm">
+                <div className="flex items-center gap-2">
+                   <FileType size={16} />
+                   <span>{rowCount.toLocaleString()} rows</span>
+                </div>
+                <div className="h-4 w-px bg-gray-300"></div>
+                <div className="flex items-center gap-2">
+                   {errors.size > 0 ? (
+                      <>
+                        <AlertTriangle size={16} className="text-amber-500" />
+                        <span className="font-medium text-amber-700">{errors.size} columns with errors</span>
+                      </>
+                   ) : (
+                      <>
+                        <CheckCircle size={16} className="text-emerald-500" />
+                        <span className="font-medium text-emerald-700">All Valid</span>
+                      </>
+                   )}
+                </div>
+             </div>
+          )}
         </div>
 
-        {summary && (
-           <div className="bg-white p-4 rounded-lg border border-gray-200 flex gap-6 text-sm">
-              <div>Row Count: <span className="font-bold">{summary.row_count}</span></div>
-              <div>Size: <span className="font-bold">{summary.file_size_mb.toFixed(4)} MB</span></div>
-           </div>
-        )}
+        {/* Main Content */}
+        <main className="w-full">
+           {rowCount === 0 ? (
+              // Empty State / Drop Zone
+              <div 
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`
+                  border-2 border-dashed rounded-xl p-12 text-center transition-all duration-200 ease-in-out
+                  flex flex-col items-center justify-center min-h-[400px] cursor-pointer
+                  ${isDragging 
+                     ? 'border-blue-500 bg-blue-50 scale-[1.01] shadow-lg' 
+                     : 'border-gray-300 hover:border-gray-400 bg-white'
+                  }
+                  ${!isReady ? 'opacity-50 pointer-events-none' : ''}
+                `}
+                onClick={() => document.getElementById('file-upload')?.click()}
+              >
+                 <div className="bg-gray-100 p-4 rounded-full mb-4">
+                    <Upload size={32} className="text-gray-500" />
+                 </div>
+                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    {loadingFile ? 'Processing CSV...' : 'Drop your dataset here'}
+                 </h3>
+                 <p className="text-gray-500 mb-6 max-w-sm">
+                    Support for CSV files. Large datasets (&gt;100MB) are processed locally via Wasm.
+                 </p>
+                 <input 
+                    id="file-upload" 
+                    type="file" 
+                    accept=".csv"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                 />
+                 <button 
+                    disabled={!isReady || loadingFile}
+                    className="bg-gray-900 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                 >
+                    Select File
+                 </button>
+              </div>
+           ) : (
+              // Data Grid
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                 <VirtualizedTable 
+                    rowCount={rowCount}
+                    schema={schema}
+                    errors={errors}
+                    fetchRows={fetchRows}
+                    onTypeChange={updateColumnType}
+                    getRow={getRow}
+                 />
+              </div>
+           )}
+        </main>
 
-        {schema.length > 0 && (
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-             <VirtualizedTable 
-                data={data}
-                schema={schema}
-                errors={errors}
-                onTypeChange={handleTypeChange}
-             />
-          </div>
-        )}
       </div>
     </div>
   );
