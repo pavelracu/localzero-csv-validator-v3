@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { ColumnType } from '../../types';
 import { FixPanel } from '../mechanic/FixPanel';
 import { AlertTriangle, Clock } from 'lucide-react';
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface ColumnHeaderProps {
     name: string;
@@ -25,9 +27,17 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
     const [showFixPanel, setShowFixPanel] = useState(false);
 
     return (
-        <div className="flex flex-col items-start space-y-1 p-2 border-b border-gray-200 bg-gray-50 h-full relative">
-            <div className="flex items-center justify-between w-full">
-                <span className="font-bold text-sm text-gray-700 truncate" title={name}>{name}</span>
+        <div className={`flex flex-col items-start space-y-1 p-2 border-b h-full relative transition-colors ${
+            isPending 
+                ? 'bg-amber-50 border-t-4 border-t-amber-400 border-b-amber-200' 
+                : errorCount > 0 
+                    ? 'bg-destructive/5 border-b-destructive/20' 
+                    : 'bg-muted/30 border-b-border'
+        }`}>
+            <div className="flex items-center justify-between w-full mb-1">
+                <span className={`font-bold text-sm truncate ${
+                    isPending ? 'text-amber-900' : errorCount > 0 ? 'text-destructive' : 'text-foreground'
+                }`} title={name}>{name}</span>
                 
                 <div className="flex items-center gap-1">
                     {isPending && (
@@ -37,44 +47,48 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
                     )}
                     
                     {errorCount > 0 && (
-                        <button 
-                            onClick={() => setShowFixPanel(!showFixPanel)}
-                            className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 hover:bg-red-200 transition-colors"
+                        <Badge 
+                            variant="destructive" 
+                            className="cursor-pointer hover:opacity-80 px-1.5 py-0.5 text-[10px] flex items-center gap-1 h-5"
+                            onClick={() => setShowFixPanel(true)}
                         >
                             <AlertTriangle size={10} />
                             {errorCount}
-                        </button>
+                        </Badge>
                     )}
                 </div>
             </div>
 
-            <select
+            <Select
                 value={type}
-                onChange={(e) => onTypeChange(e.target.value as ColumnType)}
-                className={`text-xs border rounded px-1 py-0.5 bg-white w-full cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    isPending 
-                        ? 'border-amber-300 ring-1 ring-amber-100' 
-                        : errorCount > 0 
-                            ? 'border-red-300 ring-1 ring-red-100' 
-                            : 'border-gray-300 hover:border-blue-500'
-                }`}
+                onValueChange={(val) => onTypeChange(val as ColumnType)}
             >
-                {TYPES.map(t => (
-                    <option key={t} value={t}>{t}</option>
-                ))}
-            </select>
+                <SelectTrigger className={`h-7 text-xs px-2 ${
+                    isPending 
+                        ? 'border-amber-300 ring-amber-100' 
+                        : errorCount > 0 
+                            ? 'border-destructive/30' 
+                            : ''
+                }`}>
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    {TYPES.map(t => (
+                        <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
 
-            {showFixPanel && (
-                <FixPanel 
-                    column={{ name, type }}
-                    errorCount={errorCount}
-                    onFix={(strategy) => {
-                        onFix(strategy);
-                        setShowFixPanel(false);
-                    }}
-                    onClose={() => setShowFixPanel(false)}
-                />
-            )}
+            <FixPanel 
+                column={{ name, type }}
+                errorCount={errorCount}
+                onFix={(strategy) => {
+                    onFix(strategy);
+                    setShowFixPanel(false);
+                }}
+                onClose={() => setShowFixPanel(false)}
+                open={showFixPanel}
+            />
         </div>
     );
 };

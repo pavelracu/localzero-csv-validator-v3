@@ -1,11 +1,14 @@
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ColumnSchema, ColumnType, DatasetSummary } from '../types';
 import DataWorker from '../workers/data.worker?worker';
 
+export type AppStage = 'IMPORT' | 'ARCHITECT' | 'PROCESSING' | 'STUDIO';
+
 export interface UseDataStreamReturn {
     isReady: boolean;
+    stage: AppStage;
     schema: ColumnSchema[];
+    initialSchema: ColumnSchema[];
     rowCount: number;
     errors: Map<number, Set<number>>;
     pendingValidation: Set<number>;
@@ -15,11 +18,14 @@ export interface UseDataStreamReturn {
     getRow: (index: number) => string[] | undefined;
     runBatchValidation: () => Promise<void>;
     applyFix: (colIdx: number, strategy: string) => Promise<void>;
+    confirmSchema: () => Promise<void>;
 }
 
 export function useDataStream(): UseDataStreamReturn {
     const [isReady, setIsReady] = useState(false);
+    const [stage, setStage] = useState<AppStage>('IMPORT');
     const [schema, setSchema] = useState<ColumnSchema[]>([]);
+    const [initialSchema, setInitialSchema] = useState<ColumnSchema[]>([]);
     const [rowCount, setRowCount] = useState(0);
     const [errors, setErrors] = useState<Map<number, Set<number>>>(new Map());
     const [pendingValidation, setPendingValidation] = useState<Set<number>>(new Set());
@@ -54,36 +60,6 @@ export function useDataStream(): UseDataStreamReturn {
 
     const getRow = useCallback((index: number) => rowCache.current.get(index), []);
 
-    const loadFile = useCallback(async (file: File) => {
-        if (!workerRef.current) return;
-        setSchema([]);
-        setRowCount(0);
-        setErrors(new Map());
-        rowCache.current.clear();
-
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        console.log(`Processing ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-
-        return new Promise<void>((resolve, reject) => {
-            const worker = workerRef.current!;
-            const handleLoad = (e: MessageEvent) => {
-                if (e.data.type === 'LOAD_COMPLETE') {
-                    const summary = e.data.payload as DatasetSummary;
-                    setSchema(summary.schema);
-                    setRowCount(summary.row_count);
-                    worker.removeEventListener('message', handleLoad);
-                    resolve();
-                } else if (e.data.type === 'ERROR') {
-                    worker.removeEventListener('message', handleLoad);
-                    reject(e.data.payload);
-                }
-            };
-            worker.addEventListener('message', handleLoad);
-            worker.postMessage({ type: 'LOAD_FILE', payload: bytes }, [bytes.buffer]);
-        });
-    }, []);
-
     const fetchRows = useCallback(async (start: number, limit: number): Promise<Record<number, string[]>> => {
         if (!workerRef.current || rowCount === 0) return {};
 
@@ -117,7 +93,6 @@ export function useDataStream(): UseDataStreamReturn {
                 });
                 rows.forEach((rowObj, idx) => {
                     const absoluteRowIndex = range.start + idx;
-                    // Wasm returns Maps, not Objects
                     const rowArray = schema.map(col => {
                         const val = rowObj instanceof Map ? rowObj.get(col.name) : rowObj[col.name];
                         return val || "";
@@ -130,34 +105,76 @@ export function useDataStream(): UseDataStreamReturn {
         return result;
     }, [rowCount, schema]);
 
+    const loadFile = useCallback(async (file: File) => {
+        if (!workerRef.current) return;
+        setSchema([]);
+        setRowCount(0);
+        setErrors(new Map());
+        rowCache.current.clear();
+        setPendingValidation(new Set());
+
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        console.log(`Processing ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+        await new Promise<void>((resolve, reject) => {
+            const worker = workerRef.current!;
+            const handleLoad = (e: MessageEvent) => {
+                if (e.data.type === 'LOAD_COMPLETE') {
+                    const summary = e.data.payload as DatasetSummary;
+                    setSchema(summary.schema);
+                    setRowCount(summary.row_count);
+                    worker.removeEventListener('message', handleLoad);
+                    resolve();
+                } else if (e.data.type === 'ERROR') {
+                    worker.removeEventListener('message', handleLoad);
+                    reject(e.data.payload);
+                }
+            };
+            worker.addEventListener('message', handleLoad);
+            worker.postMessage({ type: 'LOAD_FILE', payload: bytes }, [bytes.buffer]);
+        });
+        
+        setStage('ARCHITECT');
+    }, []);
+
     const updateColumnType = useCallback(async (colIdx: number, newType: ColumnType) => {
         if (!workerRef.current) return;
         
-        // Optimistic update schema
         setSchema(prev => {
             const next = [...prev];
             next[colIdx] = { ...next[colIdx], detected_type: newType };
             return next;
         });
 
-        // Queue for validation (do not validate immediately)
-        setPendingValidation(prev => new Set(prev).add(colIdx));
+        if (stage === 'STUDIO') {
+             const initialType = initialSchema[colIdx]?.detected_type;
+             const isChanged = initialType !== newType;
 
-        // Clear existing errors for this column since type changed
+             setPendingValidation(prev => {
+                 const next = new Set(prev);
+                 if (isChanged) {
+                     next.add(colIdx);
+                 } else {
+                     next.delete(colIdx);
+                 }
+                 return next;
+             });
+        }
+
         setErrors(prev => {
             const next = new Map(prev);
             next.delete(colIdx);
             return next;
         });
-    }, []);
+    }, [stage, initialSchema]);
 
-    const runBatchValidation = useCallback(async () => {
-        if (!workerRef.current || pendingValidation.size === 0) return;
+    const validateColumnsSafe = useCallback(async (colIndices: number[]) => {
+        if (!workerRef.current) return;
 
-        console.log(`Running batch validation for ${pendingValidation.size} columns...`);
+        const results = new Map<number, Set<number>>();
         
-        // Iterate over pending columns
-        for (const colIdx of pendingValidation) {
+        for (const colIdx of colIndices) {
              const col = schema[colIdx];
              if (!col) continue;
 
@@ -167,55 +184,67 @@ export function useDataStream(): UseDataStreamReturn {
                     pendingRequests.current.set(requestId, { resolve, reject });
                     workerRef.current!.postMessage({ type: 'VALIDATE_COLUMN', colIdx, newType: col.detected_type, id: requestId });
                 });
-
-                const invalidSet = new Set(invalidRowIndices);
-                setErrors(prev => {
-                    const next = new Map(prev);
-                    invalidSet.size > 0 ? next.set(colIdx, invalidSet) : next.delete(colIdx);
-                    return next;
-                });
-             } catch (e) { console.error(`Validation failed for col ${colIdx}`, e); }
+                if (invalidRowIndices.length > 0) {
+                    results.set(colIdx, new Set(invalidRowIndices));
+                }
+             } catch (e) { console.error(e); }
         }
 
+        setErrors(prev => {
+            const next = new Map(prev);
+            colIndices.forEach(idx => next.delete(idx));
+            results.forEach((val, key) => next.set(key, val));
+            return next;
+        });
+    }, [schema]);
+
+    const runBatchValidation = useCallback(async () => {
+        if (!workerRef.current || pendingValidation.size === 0) return;
+        console.log(`Running batch validation for ${pendingValidation.size} columns...`);
+        await validateColumnsSafe(Array.from(pendingValidation));
         setPendingValidation(new Set());
-    }, [pendingValidation, schema]);
+    }, [pendingValidation, validateColumnsSafe]);
+
+    const confirmSchema = useCallback(async () => {
+        setStage('PROCESSING');
+        setInitialSchema(JSON.parse(JSON.stringify(schema)));
+        
+        const allIndices = schema.map((_, i) => i);
+        await validateColumnsSafe(allIndices);
+        
+        setStage('STUDIO');
+    }, [schema, validateColumnsSafe]);
 
     const applyFix = useCallback(async (colIdx: number, strategy: string) => {
          if (!workerRef.current) return;
 
          const requestId = `fix_${colIdx}_${Date.now()}`;
          try {
-             const count = await new Promise<number>((resolve, reject) => {
+             await new Promise<number>((resolve, reject) => {
                  pendingRequests.current.set(requestId, { resolve, reject });
                  workerRef.current!.postMessage({ type: 'APPLY_CORRECTION', colIdx, strategy, id: requestId });
              });
              
-             console.log(`Fixed ${count} cells in column ${colIdx}`);
-             
-             // Re-validate immediately to clear errors
-             const valRequestId = `val_fix_${colIdx}_${Date.now()}`;
-             const col = schema[colIdx];
-             const invalidRowIndices = await new Promise<Uint32Array>((resolve, reject) => {
-                 pendingRequests.current.set(valRequestId, { resolve, reject });
-                 workerRef.current!.postMessage({ type: 'VALIDATE_COLUMN', colIdx, newType: col.detected_type, id: valRequestId });
-             });
-
-             const invalidSet = new Set(invalidRowIndices);
-             setErrors(prev => {
-                 const next = new Map(prev);
-                 invalidSet.size > 0 ? next.set(colIdx, invalidSet) : next.delete(colIdx);
-                 return next;
-             });
-
-             // Invalidate row cache so UI updates
+             await validateColumnsSafe([colIdx]);
              rowCache.current.clear();
-             // We can trigger a force update by slightly modifying rowCount or just relying on errors change?
-             // Since fetchRows depends on rowCache, clearing it ensures next fetch gets fresh data.
-             // But we need to trigger a re-render of the grid.
-             // errors change triggers VirtualizedTable re-render, which calls fetchRows.
              
          } catch (e) { console.error("Fix failed", e); }
-    }, [schema]);
+    }, [schema, validateColumnsSafe]);
 
-    return { isReady, schema, rowCount, errors, pendingValidation, loadFile, fetchRows, updateColumnType, getRow, runBatchValidation, applyFix };
+    return { 
+        isReady, 
+        stage, 
+        schema, 
+        initialSchema,
+        rowCount, 
+        errors, 
+        pendingValidation, 
+        loadFile, 
+        fetchRows, 
+        updateColumnType, 
+        getRow, 
+        runBatchValidation, 
+        applyFix, 
+        confirmSchema 
+    };
 }
