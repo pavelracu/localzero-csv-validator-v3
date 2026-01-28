@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ColumnSchema, ColumnType, DatasetSummary } from '../types';
 import DataWorker from '../workers/data.worker?worker';
@@ -7,10 +8,13 @@ export interface UseDataStreamReturn {
     schema: ColumnSchema[];
     rowCount: number;
     errors: Map<number, Set<number>>;
+    pendingValidation: Set<number>;
     loadFile: (file: File) => Promise<void>;
     fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>;
     updateColumnType: (colIdx: number, newType: ColumnType) => Promise<void>;
     getRow: (index: number) => string[] | undefined;
+    runBatchValidation: () => Promise<void>;
+    applyFix: (colIdx: number, strategy: string) => Promise<void>;
 }
 
 export function useDataStream(): UseDataStreamReturn {
@@ -18,6 +22,7 @@ export function useDataStream(): UseDataStreamReturn {
     const [schema, setSchema] = useState<ColumnSchema[]>([]);
     const [rowCount, setRowCount] = useState(0);
     const [errors, setErrors] = useState<Map<number, Set<number>>>(new Map());
+    const [pendingValidation, setPendingValidation] = useState<Set<number>>(new Set());
     
     const workerRef = useRef<Worker | null>(null);
     const pendingRequests = useRef<Map<string, { resolve: (data: any) => void; reject: (err: any) => void }>>(new Map());
@@ -32,7 +37,7 @@ export function useDataStream(): UseDataStreamReturn {
 
             if (type === 'INIT_COMPLETE') {
                 setIsReady(true);
-            } else if (type === 'GET_ROWS_COMPLETE' || type === 'VALIDATE_COLUMN_COMPLETE') {
+            } else if (type === 'GET_ROWS_COMPLETE' || type === 'VALIDATE_COLUMN_COMPLETE' || type === 'CORRECTION_COMPLETE') {
                 const request = pendingRequests.current.get(id);
                 if (request) {
                     request.resolve(payload);
@@ -128,28 +133,89 @@ export function useDataStream(): UseDataStreamReturn {
     const updateColumnType = useCallback(async (colIdx: number, newType: ColumnType) => {
         if (!workerRef.current) return;
         
-        // Optimistic update
+        // Optimistic update schema
         setSchema(prev => {
             const next = [...prev];
             next[colIdx] = { ...next[colIdx], detected_type: newType };
             return next;
         });
 
-        const requestId = `val_${colIdx}_${Date.now()}`;
-        try {
-            const invalidRowIndices = await new Promise<Uint32Array>((resolve, reject) => {
-                pendingRequests.current.set(requestId, { resolve, reject });
-                workerRef.current!.postMessage({ type: 'VALIDATE_COLUMN', colIdx, newType, id: requestId });
-            });
+        // Queue for validation (do not validate immediately)
+        setPendingValidation(prev => new Set(prev).add(colIdx));
 
-            const invalidSet = new Set(invalidRowIndices);
-            setErrors(prev => {
-                const next = new Map(prev);
-                invalidSet.size > 0 ? next.set(colIdx, invalidSet) : next.delete(colIdx);
-                return next;
-            });
-        } catch (e) { console.error("Validation failed", e); }
+        // Clear existing errors for this column since type changed
+        setErrors(prev => {
+            const next = new Map(prev);
+            next.delete(colIdx);
+            return next;
+        });
     }, []);
 
-    return { isReady, schema, rowCount, errors, loadFile, fetchRows, updateColumnType, getRow };
+    const runBatchValidation = useCallback(async () => {
+        if (!workerRef.current || pendingValidation.size === 0) return;
+
+        console.log(`Running batch validation for ${pendingValidation.size} columns...`);
+        
+        // Iterate over pending columns
+        for (const colIdx of pendingValidation) {
+             const col = schema[colIdx];
+             if (!col) continue;
+
+             const requestId = `val_${colIdx}_${Date.now()}`;
+             try {
+                const invalidRowIndices = await new Promise<Uint32Array>((resolve, reject) => {
+                    pendingRequests.current.set(requestId, { resolve, reject });
+                    workerRef.current!.postMessage({ type: 'VALIDATE_COLUMN', colIdx, newType: col.detected_type, id: requestId });
+                });
+
+                const invalidSet = new Set(invalidRowIndices);
+                setErrors(prev => {
+                    const next = new Map(prev);
+                    invalidSet.size > 0 ? next.set(colIdx, invalidSet) : next.delete(colIdx);
+                    return next;
+                });
+             } catch (e) { console.error(`Validation failed for col ${colIdx}`, e); }
+        }
+
+        setPendingValidation(new Set());
+    }, [pendingValidation, schema]);
+
+    const applyFix = useCallback(async (colIdx: number, strategy: string) => {
+         if (!workerRef.current) return;
+
+         const requestId = `fix_${colIdx}_${Date.now()}`;
+         try {
+             const count = await new Promise<number>((resolve, reject) => {
+                 pendingRequests.current.set(requestId, { resolve, reject });
+                 workerRef.current!.postMessage({ type: 'APPLY_CORRECTION', colIdx, strategy, id: requestId });
+             });
+             
+             console.log(`Fixed ${count} cells in column ${colIdx}`);
+             
+             // Re-validate immediately to clear errors
+             const valRequestId = `val_fix_${colIdx}_${Date.now()}`;
+             const col = schema[colIdx];
+             const invalidRowIndices = await new Promise<Uint32Array>((resolve, reject) => {
+                 pendingRequests.current.set(valRequestId, { resolve, reject });
+                 workerRef.current!.postMessage({ type: 'VALIDATE_COLUMN', colIdx, newType: col.detected_type, id: valRequestId });
+             });
+
+             const invalidSet = new Set(invalidRowIndices);
+             setErrors(prev => {
+                 const next = new Map(prev);
+                 invalidSet.size > 0 ? next.set(colIdx, invalidSet) : next.delete(colIdx);
+                 return next;
+             });
+
+             // Invalidate row cache so UI updates
+             rowCache.current.clear();
+             // We can trigger a force update by slightly modifying rowCount or just relying on errors change?
+             // Since fetchRows depends on rowCache, clearing it ensures next fetch gets fresh data.
+             // But we need to trigger a re-render of the grid.
+             // errors change triggers VirtualizedTable re-render, which calls fetchRows.
+             
+         } catch (e) { console.error("Fix failed", e); }
+    }, [schema]);
+
+    return { isReady, schema, rowCount, errors, pendingValidation, loadFile, fetchRows, updateColumnType, getRow, runBatchValidation, applyFix };
 }

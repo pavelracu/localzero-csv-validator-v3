@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useDataStream } from './hooks/useDataStream';
 import { VirtualizedTable } from './components/grid/VirtualizedTable';
-import { Upload, FileType, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Upload, FileType, CheckCircle, AlertTriangle, Play, Loader2 } from 'lucide-react';
 
 function App() {
   const { 
@@ -9,14 +9,18 @@ function App() {
     schema, 
     rowCount, 
     errors, 
+    pendingValidation,
     loadFile, 
     fetchRows, 
     updateColumnType,
+    runBatchValidation,
+    applyFix,
     getRow
   } = useDataStream();
 
   const [isDragging, setIsDragging] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -76,24 +80,41 @@ function App() {
           </div>
           
           {rowCount > 0 && (
-             <div className="flex items-center gap-6 text-sm text-gray-600 bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm">
-                <div className="flex items-center gap-2">
-                   <FileType size={16} />
-                   <span>{rowCount.toLocaleString()} rows</span>
-                </div>
-                <div className="h-4 w-px bg-gray-300"></div>
-                <div className="flex items-center gap-2">
-                   {errors.size > 0 ? (
-                      <>
-                        <AlertTriangle size={16} className="text-amber-500" />
-                        <span className="font-medium text-amber-700">{errors.size} columns with errors</span>
-                      </>
-                   ) : (
-                      <>
-                        <CheckCircle size={16} className="text-emerald-500" />
-                        <span className="font-medium text-emerald-700">All Valid</span>
-                      </>
-                   )}
+             <div className="flex items-center gap-4">
+                {pendingValidation.size > 0 && (
+                    <button
+                        onClick={async () => {
+                            setIsValidating(true);
+                            await runBatchValidation();
+                            setIsValidating(false);
+                        }}
+                        disabled={isValidating}
+                        className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm disabled:opacity-70"
+                    >
+                        {isValidating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+                        Validate {pendingValidation.size} Changes
+                    </button>
+                )}
+
+                <div className="flex items-center gap-6 text-sm text-gray-600 bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm">
+                    <div className="flex items-center gap-2">
+                    <FileType size={16} />
+                    <span>{rowCount.toLocaleString()} rows</span>
+                    </div>
+                    <div className="h-4 w-px bg-gray-300"></div>
+                    <div className="flex items-center gap-2">
+                    {errors.size > 0 ? (
+                        <>
+                            <AlertTriangle size={16} className="text-amber-500" />
+                            <span className="font-medium text-amber-700">{errors.size} columns with errors</span>
+                        </>
+                    ) : (
+                        <>
+                            <CheckCircle size={16} className="text-emerald-500" />
+                            <span className="font-medium text-emerald-700">All Valid</span>
+                        </>
+                    )}
+                    </div>
                 </div>
              </div>
           )}
@@ -148,8 +169,10 @@ function App() {
                     rowCount={rowCount}
                     schema={schema}
                     errors={errors}
+                    pendingValidation={pendingValidation}
                     fetchRows={fetchRows}
                     onTypeChange={updateColumnType}
+                    onFix={applyFix}
                     getRow={getRow}
                  />
               </div>

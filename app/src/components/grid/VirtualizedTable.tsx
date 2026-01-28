@@ -13,8 +13,10 @@ interface VirtualizedTableProps {
   rowCount: number;
   schema: ColumnSchema[];
   errors: Map<number, Set<number>>;
+  pendingValidation: Set<number>;
   fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>;
   onTypeChange: (colIndex: number, newType: ColumnType) => void;
+  onFix: (colIndex: number, strategy: string) => void;
   getRow: (index: number) => string[] | undefined;
 }
 
@@ -24,8 +26,10 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
   rowCount,
   schema,
   errors,
+  pendingValidation,
   fetchRows,
   onTypeChange,
+  onFix,
   getRow,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -85,13 +89,16 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
           <ColumnHeader
             name={col.name}
             type={col.detected_type}
+            isPending={pendingValidation.has(index)}
+            errorCount={errors.get(index)?.size || 0}
             onTypeChange={(newType) => onTypeChange(index, newType)}
+            onFix={(strategy) => onFix(index, strategy)}
           />
         ),
         cell: (info) => info.getValue(),
       })
     );
-  }, [schema, onTypeChange]);
+  }, [schema, onTypeChange, pendingValidation, errors, onFix]);
 
   const table = useReactTable({
     data: [], // Keep empty to avoid processing all rows

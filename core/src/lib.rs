@@ -113,6 +113,60 @@ pub fn validate_chunk(start_row: usize, limit: usize) -> Result<JsValue, JsValue
 }
 
 #[wasm_bindgen]
+pub fn apply_correction(col_idx: usize, strategy: &str) -> Result<usize, JsValue> {
+    let mut store = DATASET.lock().unwrap();
+    
+    if let Some(df) = store.as_mut() {
+        let mut fixed_count = 0;
+        let col_type = df.columns[col_idx].detected_type;
+
+        // We need to collect indices first to avoid borrowing conflict (mutable borrow of patches vs immutable borrow for get_cell)
+        // Actually, get_cell borrows self immutably. modifying patches borrows self mutably.
+        // So we must do this in two passes or be clever.
+        // Pass 1: Find invalid rows
+        let mut invalid_rows = Vec::new();
+        for row_idx in 0..df.rows {
+            if let Some(val) = df.get_cell(row_idx, col_idx) {
+                if !col_type.is_valid(&val) {
+                    invalid_rows.push(row_idx);
+                }
+            }
+        }
+
+        // Pass 2: Apply fixes
+        for row_idx in invalid_rows {
+            match strategy {
+                "clear" => {
+                    // Set to empty string
+                    df.patches
+                        .entry(row_idx)
+                        .or_insert_with(HashMap::new)
+                        .insert(col_idx, "".to_string());
+                    fixed_count += 1;
+                },
+                "revert" => {
+                    // Remove from patches (if exists)
+                    if let Some(row_patches) = df.patches.get_mut(&row_idx) {
+                        if row_patches.remove(&col_idx).is_some() {
+                             fixed_count += 1;
+                        }
+                        // Clean up empty row map if needed? Not strictly necessary but good for memory.
+                        if row_patches.is_empty() {
+                            df.patches.remove(&row_idx);
+                        }
+                    }
+                },
+                _ => return Err(JsValue::from_str(&format!("Unknown strategy: {}", strategy))),
+            }
+        }
+
+        Ok(fixed_count)
+    } else {
+        Err(JsValue::from_str("No dataset loaded"))
+    }
+}
+
+#[wasm_bindgen]
 pub fn update_cell(row_idx: usize, col_idx: usize, value: String) -> Result<bool, JsValue> {
     let mut store = DATASET.lock().unwrap();
     if let Some(df) = store.as_mut() {
