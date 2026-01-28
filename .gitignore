@@ -1,0 +1,6 @@
+target/
+node_modules/
+dist/
+pkg/
+.env
+.DS_Store
