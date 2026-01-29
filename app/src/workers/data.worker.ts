@@ -90,7 +90,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         validationJob = {
             active: true,
             currentStart: 0,
-            chunkSize: 5000,
+            chunkSize: 50000,
             startTime: performance.now()
         };
         processValidationChunk();

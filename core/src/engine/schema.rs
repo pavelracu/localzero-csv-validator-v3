@@ -26,22 +26,25 @@ lazy_static! {
 
 impl ColumnType {
     pub fn is_valid(&self, value: &str) -> bool {
+        self.is_valid_fast(value)
+    }
+
+    pub fn is_valid_fast(&self, value: &str) -> bool {
         if value.is_empty() {
-            return true; // Assume empty is valid for now, or handled separately
+            return true;
         }
         match self {
             ColumnType::Text => true,
-            ColumnType::Integer => value.parse::<i64>().is_ok(),
-            ColumnType::Float => value.parse::<f64>().is_ok(),
+            ColumnType::Integer => value.trim().parse::<i64>().is_ok(),
+            ColumnType::Float => value.trim().parse::<f64>().is_ok(),
             ColumnType::Boolean => {
-                let v = value.to_lowercase();
-                matches!(v.as_str(), "true" | "false" | "1" | "0" | "yes" | "no")
+                // Optimized check: "true" or "false" only, case-sensitive per instructions
+                // "Ensure Boolean checks are simple string comparisons ("true"/"false")."
+                value == "true" || value == "false"
             },
             ColumnType::Email => EMAIL_REGEX.is_match(value),
             ColumnType::PhoneUS => PHONE_US_REGEX.is_match(value),
             ColumnType::Date => {
-                 // Try parsing strict ISO 8601 first, then common formats
-                 // Using chrono's strict parsing for now or specific formats
                  if chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() { return true; }
                  if chrono::NaiveDate::parse_from_str(value, "%m/%d/%Y").is_ok() { return true; }
                  false

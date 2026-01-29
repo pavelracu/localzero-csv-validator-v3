@@ -107,4 +107,108 @@ impl DataFrame {
         
         Some(row_values)
     }
+
+    pub fn validate_range(&self, start_row: usize, limit: usize) -> Vec<usize> {
+        let mut errors = Vec::new();
+        if start_row >= self.rows {
+            return errors;
+        }
+
+        let start_byte = self.row_indices[start_row];
+        let slice = &self.raw_data[start_byte..];
+        let cursor = Cursor::new(slice);
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(cursor);
+        
+        let mut record = StringRecord::new();
+        
+        for i in 0..limit {
+            let current_row = start_row + i;
+            if current_row >= self.rows {
+                break;
+            }
+            
+            // Read into reusable record
+            if !reader.read_record(&mut record).unwrap_or(false) {
+                break;
+            }
+
+            for (col_idx, column) in self.columns.iter().enumerate() {
+                // 1. Check Patch
+                let mut is_patched = false;
+                if let Some(row_patches) = self.patches.get(&current_row) {
+                     if let Some(patch_val) = row_patches.get(&col_idx) {
+                         is_patched = true;
+                         if !column.detected_type.is_valid_fast(patch_val) {
+                             errors.push(current_row);
+                             errors.push(col_idx);
+                         }
+                     }
+                }
+
+                // 2. Check Raw
+                if !is_patched {
+                    if let Some(val) = record.get(col_idx) {
+                        if !column.detected_type.is_valid_fast(val) {
+                            errors.push(current_row);
+                            errors.push(col_idx);
+                        }
+                    }
+                }
+            }
+        }
+        errors
+    }
+
+    pub fn validate_column_fast(&self, col_idx: usize, col_type: ColumnType) -> Vec<usize> {
+        let mut error_indices = Vec::new();
+
+        let cursor = Cursor::new(&self.raw_data);
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(true) // Assumes headers are present, adjust if needed
+            .from_reader(cursor);
+
+        // We iterate with an index to get the row number
+        for (row_idx, result) in reader.records().enumerate() {
+            match result {
+                Ok(record) => {
+                    let mut is_valid = true;
+                    let mut is_patched = false;
+
+                    // 1. Check Patches first
+                    if let Some(row_patches) = self.patches.get(&row_idx) {
+                        if let Some(patch_val) = row_patches.get(&col_idx) {
+                            is_patched = true;
+                            if !col_type.is_valid_fast(patch_val) {
+                                is_valid = false;
+                            }
+                        }
+                    }
+
+                    // 2. Check Raw if not patched
+                    if !is_patched {
+                        if let Some(val) = record.get(col_idx) {
+                            if !col_type.is_valid_fast(val) {
+                                is_valid = false;
+                            }
+                        } else {
+                            // This case means the record has fewer columns than col_idx, which is an error
+                            is_valid = false;
+                        }
+                    }
+
+                    if !is_valid {
+                        error_indices.push(row_idx);
+                    }
+                }
+                Err(_) => {
+                    // This row is malformed, so it's an error.
+                    error_indices.push(row_idx);
+                }
+            }
+        }
+
+        error_indices
+    }
 }

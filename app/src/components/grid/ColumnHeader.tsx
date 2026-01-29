@@ -72,7 +72,10 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
                 }`}>
                     <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                {/* Fix: Use position="popper" and ensure z-index is high. 
+                   The standard SelectContent uses a Portal by default, which is good.
+                */}
+                <SelectContent position="popper" className="z-50 max-h-[200px]">
                     {TYPES.map(t => (
                         <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
                     ))}

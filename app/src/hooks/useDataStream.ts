@@ -33,6 +33,8 @@ export function useDataStream(): UseDataStreamReturn {
     const workerRef = useRef<Worker | null>(null);
     const pendingRequests = useRef<Map<string, { resolve: (data: any) => void; reject: (err: any) => void }>>(new Map());
     const rowCache = useRef<Map<number, string[]>>(new Map());
+    const inflightChunks = useRef<Set<number>>(new Set());
+    const isBatchValidating = useRef(false);
 
     useEffect(() => {
         const worker = new DataWorker();
@@ -115,8 +117,13 @@ export function useDataStream(): UseDataStreamReturn {
         if (currentMissingStart !== -1) missingRanges.push({ start: currentMissingStart, limit: currentMissingCount });
 
         for (const range of missingRanges) {
+            if (inflightChunks.current.has(range.start)) {
+                continue; // Already fetching this chunk
+            }
+
             const requestId = `fetch_${range.start}_${range.limit}_${Date.now()}`;
             try {
+                inflightChunks.current.add(range.start);
                 const rows = await new Promise<any[]>((resolve, reject) => {
                     pendingRequests.current.set(requestId, { resolve, reject });
                     workerRef.current!.postMessage({ type: 'GET_ROWS', start: range.start, limit: range.limit, id: requestId });
@@ -130,7 +137,11 @@ export function useDataStream(): UseDataStreamReturn {
                     rowCache.current.set(absoluteRowIndex, rowArray);
                     result[absoluteRowIndex] = rowArray;
                 });
-            } catch (err) { console.error(err); }
+            } catch (err) { 
+                console.error(err); 
+            } finally {
+                inflightChunks.current.delete(range.start);
+            }
         }
         return result;
     }, [rowCount, schema]);
@@ -200,32 +211,39 @@ export function useDataStream(): UseDataStreamReturn {
     }, [stage, initialSchema]);
 
     const validateColumnsSafe = useCallback(async (colIndices: number[]) => {
-        if (!workerRef.current) return;
+        if (!workerRef.current || isBatchValidating.current) return;
 
-        const results = new Map<number, Set<number>>();
-        
-        for (const colIdx of colIndices) {
-             const col = schema[colIdx];
-             if (!col) continue;
+        isBatchValidating.current = true;
+        try {
+            console.time(`Validation Batch (${colIndices.length} cols)`); // LOG START
+            const results = new Map<number, Set<number>>();
+            
+            for (const colIdx of colIndices) {
+                const col = schema[colIdx];
+                if (!col) continue;
 
-             const requestId = `val_${colIdx}_${Date.now()}`;
-             try {
-                const invalidRowIndices = await new Promise<Uint32Array>((resolve, reject) => {
-                    pendingRequests.current.set(requestId, { resolve, reject });
-                    workerRef.current!.postMessage({ type: 'VALIDATE_COLUMN', colIdx, newType: col.detected_type, id: requestId });
-                });
-                if (invalidRowIndices.length > 0) {
-                    results.set(colIdx, new Set(invalidRowIndices));
-                }
-             } catch (e) { console.error(e); }
+                const requestId = `val_${colIdx}_${Date.now()}`;
+                try {
+                    const invalidRowIndices = await new Promise<Uint32Array>((resolve, reject) => {
+                        pendingRequests.current.set(requestId, { resolve, reject });
+                        workerRef.current!.postMessage({ type: 'VALIDATE_COLUMN', colIdx, newType: col.detected_type, id: requestId });
+                    });
+                    if (invalidRowIndices.length > 0) {
+                        results.set(colIdx, new Set(invalidRowIndices));
+                    }
+                } catch (e) { console.error(e); }
+            }
+
+            setErrors(prev => {
+                const next = new Map(prev);
+                colIndices.forEach(idx => next.delete(idx));
+                results.forEach((val, key) => next.set(key, val));
+                return next;
+            });
+            console.timeEnd(`Validation Batch (${colIndices.length} cols)`); // LOG END
+        } finally {
+            isBatchValidating.current = false;
         }
-
-        setErrors(prev => {
-            const next = new Map(prev);
-            colIndices.forEach(idx => next.delete(idx));
-            results.forEach((val, key) => next.set(key, val));
-            return next;
-        });
     }, [schema]);
 
     const runBatchValidation = useCallback(async () => {
@@ -256,6 +274,14 @@ export function useDataStream(): UseDataStreamReturn {
              });
              
              await validateColumnsSafe([colIdx]);
+             
+             // After applying a fix and re-validating, clear its pending status
+             setPendingValidation(prev => {
+                 const next = new Set(prev);
+                 next.delete(colIdx);
+                 return next;
+             });
+
              rowCache.current.clear();
              
          } catch (e) { console.error("Fix failed", e); }

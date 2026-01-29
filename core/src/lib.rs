@@ -2,7 +2,6 @@ use wasm_bindgen::prelude::*;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
-use regex::Regex;
 
 mod engine;
 use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}};
@@ -10,10 +9,6 @@ use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, Colum
 // GLOBAL STATE (The "Database" in Memory)
 lazy_static! {
     static ref DATASET: Mutex<Option<DataFrame>> = Mutex::new(None);
-    static ref RE_INTEGER: Regex = Regex::new(r"^-?\d+$").unwrap();
-    static ref RE_FLOAT: Regex = Regex::new(r"^-?\d*\.?\d+$").unwrap();
-    static ref RE_EMAIL: Regex = Regex::new(r"^[\w\-\.]+@([\w-]+\.)+[\w-]{2,4}$").unwrap();
-    static ref RE_PHONE_US: Regex = Regex::new(r"^\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})$").unwrap();
 }
 
 #[wasm_bindgen]
@@ -92,42 +87,12 @@ pub fn get_rows(start: usize, limit: usize) -> Result<JsValue, JsValue> {
     }
 }
 
-pub fn validate_cell_optimized(value: &str, col_type: &ColumnType) -> bool {
-    if value.is_empty() { return true; } // Assume empty is valid or handle separately
-    
-    match col_type {
-        ColumnType::Text => true,
-        ColumnType::Integer => RE_INTEGER.is_match(value),
-        ColumnType::Float => RE_FLOAT.is_match(value),
-        ColumnType::Boolean => value == "true" || value == "false",
-        ColumnType::Email => RE_EMAIL.is_match(value),
-        ColumnType::PhoneUS => RE_PHONE_US.is_match(value),
-        _ => true,
-    }
-}
-
 #[wasm_bindgen]
 pub fn validate_chunk(start_row: usize, limit: usize) -> Result<JsValue, JsValue> {
     let store = DATASET.lock().unwrap();
     if let Some(df) = &*store {
-        let end = std::cmp::min(start_row + limit, df.rows);
-        
-        // Use a flat vector for speed: [row_idx, col_idx, row_idx, col_idx...]
-        let mut error_flat_list: Vec<usize> = Vec::with_capacity(limit); 
-
-        for row_idx in start_row..end {
-            if let Some(row_values) = df.get_row(row_idx) {
-                for (col_idx, val) in row_values.iter().enumerate() {
-                    let col_type = &df.columns[col_idx].detected_type;
-                    
-                    // Fast Check
-                    if !validate_cell_optimized(val, col_type) {
-                        error_flat_list.push(row_idx);
-                        error_flat_list.push(col_idx);
-                    }
-                }
-            }
-        }
+        // Delegate to DataFrame's optimized zero-copy validator
+        let error_flat_list = df.validate_range(start_row, limit);
         
         Ok(serde_wasm_bindgen::to_value(&error_flat_list)?)
     } else {
@@ -230,16 +195,9 @@ pub fn validate_column(col_idx: usize, type_name: &str) -> Result<Vec<usize>, Js
         df.set_column_type(col_idx, new_type);
 
         // 3. Scan the column and find invalid rows
-        let mut error_indices = Vec::new();
-        
-        // Iterate over all rows (lazy scan)
-        for row_idx in 0..df.rows {
-            if let Some(val) = df.get_cell(row_idx, col_idx) {
-                if !new_type.is_valid(&val) {
-                    error_indices.push(row_idx);
-                }
-            }
-        }
+        time("Rust: validate_column_fast");
+        let error_indices = df.validate_column_fast(col_idx, new_type);
+        timeEnd("Rust: validate_column_fast");
         
         // Return the list of Row IDs that failed
         Ok(error_indices)
