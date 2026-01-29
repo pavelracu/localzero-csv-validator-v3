@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ColumnSchema, ColumnType, DatasetSummary, Suggestion, SuggestionReport } from '../types';
 import DataWorker from '../workers/data.worker?worker';
 
-export type AppStage = 'IMPORT' | 'ARCHITECT' | 'PROCESSING' | 'STUDIO';
+export type AppStage = 'IMPORT' | 'SCHEMA' | 'PROCESSING' | 'STUDIO';
 
 export interface UseDataStreamReturn {
     isReady: boolean;
@@ -184,7 +184,7 @@ export function useDataStream(): UseDataStreamReturn {
             worker.postMessage({ type: 'LOAD_FILE', payload: bytes }, [bytes.buffer]);
         });
         
-        setStage('ARCHITECT');
+        setStage('SCHEMA');
     }, []);
 
     const updateColumnType = useCallback(async (colIdx: number, newType: ColumnType) => {

@@ -1,18 +1,15 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, FileType, ArrowRight } from 'lucide-react';
+import { Upload, ShieldCheck } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-
-import { SchemaPreset } from '../../types';
+import { Badge } from "@/components/ui/badge";
 
 interface ImportProps {
   onFileSelect: (file: File) => void;
-  onPresetSelect: (preset: SchemaPreset) => void;
   isReady: boolean;
-  presets: SchemaPreset[];
 }
 
-export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, isReady, presets }) => {
+export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady }) => {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -44,7 +41,7 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, is
         
         <div className="text-center space-y-2">
           <h2 className="text-3xl font-bold tracking-tight text-foreground">Import Data</h2>
-          <p className="text-muted-foreground">Upload your raw CSV to begin the secure validation process.</p>
+          <p className="text-muted-foreground">Your data never leaves this device.</p>
         </div>
 
         <Card
@@ -66,11 +63,18 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, is
            <div className="bg-background p-4 rounded-full shadow-sm mb-4 ring-1 ring-border">
               <Upload size={32} className="text-primary" />
            </div>
+           <Badge variant="outline" className="mb-3 gap-1.5 border-emerald-200 bg-emerald-50/50">
+             <ShieldCheck size={12} className="text-emerald-600" />
+             <span className="text-emerald-700 text-xs font-medium">Offline — Data never leaves your device</span>
+           </Badge>
            <h3 className="text-lg font-semibold text-foreground mb-1">
               Upload CSV Data File
            </h3>
-           <p className="text-sm text-muted-foreground mb-6">
-              Drag & drop or click to browse (Max 1GB)
+           <p className="text-sm text-muted-foreground mb-2">
+              Process up to 1GB. 100% in your browser.
+           </p>
+           <p className="text-xs text-muted-foreground mb-6">
+              Drag & drop or click to browse
            </p>
            
            <input 
@@ -83,19 +87,6 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, is
            
            <Button>Browse Files</Button>
         </Card>
-
-        {/* Presets - Keeping it simple for now */}
-        <div className="grid grid-cols-2 gap-4">
-          {presets.map((preset, i) => (
-            <Button key={i} variant="outline" className="justify-between h-auto py-4" onClick={() => onPresetSelect(preset)}>
-              <span className="flex items-center gap-2">
-                <FileType size={16} className="text-muted-foreground" />
-                {preset.name}
-              </span>
-              <ArrowRight size={14} className="text-muted-foreground" />
-            </Button>
-          ))}
-        </div>
       </div>
     </div>
   );

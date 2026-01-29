@@ -73,15 +73,17 @@ export const FixPanel: React.FC<FixPanelProps> = ({
                 <SheetHeader>
                     <SheetTitle className="flex items-center gap-2">
                         <AlertTriangle size={20} className="text-destructive"/>
-                        Resolve Errors
+                        Fix errors — {column.name}
                     </SheetTitle>
                     <SheetDescription>
-                        Found <strong className="text-foreground">{errorCount}</strong> errors in column <span className="font-mono bg-muted px-1 rounded text-foreground">{column.name}</span>
+                        Fixes for <strong className="text-foreground">{column.type}</strong>. Found <strong className="text-foreground">{errorCount}</strong> errors in this column.
                     </SheetDescription>
                 </SheetHeader>
                 
                 <div className="mt-6 space-y-4">
+                    {/* Suggested Fixes First */}
                     <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-foreground">Suggested Fixes</h3>
                         {isLoading && (
                             <>
                                 <div className="h-[90px] w-full bg-muted/60 animate-pulse rounded-lg" />
@@ -103,7 +105,7 @@ export const FixPanel: React.FC<FixPanelProps> = ({
                     <div className="relative">
                         <Separator />
                         <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                            <div className="mx-auto bg-background px-2 text-xs text-muted-foreground">Manual Fixes</div>
+                            <div className="mx-auto bg-background px-2 text-xs text-muted-foreground">Manual Actions</div>
                         </div>
                     </div>
 

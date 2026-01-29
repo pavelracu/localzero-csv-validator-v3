@@ -1,16 +1,21 @@
-import React from 'react';
-import { ColumnSchema, ColumnType } from '../../types';
-import { Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, FileType, Save } from 'lucide-react'; // Added Save
+import React, { useState } from 'react';
+import { ColumnSchema, ColumnType, SchemaPreset } from '../../types';
+import { Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, FileType, Save, FolderOpen } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 
 interface MappingProps {
     schema: ColumnSchema[];
     sampleRows: Record<number, string[]>;
     onTypeChange: (colIndex: number, newType: ColumnType) => void;
     onConfirm: () => void;
-    onSavePreset: () => void; // Added prop
+    onSavePreset: (name: string) => void;
+    onLoadPreset: (preset: SchemaPreset) => void;
+    presets: SchemaPreset[];
 }
 
 const TYPE_ICONS: Record<ColumnType, React.ReactNode> = {
@@ -30,8 +35,25 @@ export const Mapping: React.FC<MappingProps> = ({
     sampleRows, 
     onTypeChange, 
     onConfirm,
-    onSavePreset // Destructure prop
+    onSavePreset,
+    onLoadPreset,
+    presets
 }) => {
+    const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+    const [saveSchemaName, setSaveSchemaName] = useState('');
+    
+    const handleOpenSaveDialog = () => {
+        setSaveSchemaName('');
+        setSaveDialogOpen(true);
+    };
+    
+    const handleSaveSchemaSubmit = () => {
+        const name = saveSchemaName.trim();
+        if (!name) return;
+        onSavePreset(name);
+        setSaveDialogOpen(false);
+        setSaveSchemaName('');
+    };
     
     const getSampleValues = (colIndex: number) => {
         const values: string[] = [];
@@ -83,21 +105,67 @@ export const Mapping: React.FC<MappingProps> = ({
 
             {/* Bottom Pane: Column Mapper */}
             <div className="flex-1 flex flex-col overflow-hidden bg-background">
-                <div className="px-4 py-3 border-b flex items-center justify-between bg-background z-20 shadow-sm">
+                <div className="px-4 py-3 border-b flex items-center justify-between bg-background z-20 shadow-sm flex-wrap gap-2">
                     <div>
                         <h2 className="text-lg font-bold">Map Columns</h2>
                         <p className="text-xs text-muted-foreground">Define data types for validation</p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {presets.length > 0 && (
+                            <Select
+                                onValueChange={(id) => {
+                                    const preset = presets.find(p => p.id === id);
+                                    if (preset) onLoadPreset(preset);
+                                }}
+                            >
+                                <SelectTrigger className="w-[180px] h-9 gap-2">
+                                    <FolderOpen size={14} className="shrink-0" />
+                                    <SelectValue placeholder="Load schema" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {presets.map((preset) => (
+                                        <SelectItem key={preset.id} value={preset.id}>
+                                            {preset.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        )}
                         <Button 
                             variant="outline" 
                             size="sm" 
-                            onClick={onSavePreset} 
+                            onClick={handleOpenSaveDialog} 
                             className="gap-2 h-9"
                         >
                             <Save size={16} />
-                            Save as Preset
+                            Save schema
                         </Button>
+                        <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+                            <DialogContent className="sm:max-w-md">
+                                <DialogHeader>
+                                    <DialogTitle>Save schema</DialogTitle>
+                                </DialogHeader>
+                                <div className="grid gap-4 py-4">
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="schema-name">Name</Label>
+                                        <Input
+                                            id="schema-name"
+                                            placeholder="e.g. Monthly Sales"
+                                            value={saveSchemaName}
+                                            onChange={(e) => setSaveSchemaName(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleSaveSchemaSubmit()}
+                                        />
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => setSaveDialogOpen(false)}>Cancel</Button>
+                                    <Button onClick={handleSaveSchemaSubmit} disabled={!saveSchemaName.trim()} className="gap-2">
+                                        <Save size={14} />
+                                        Save
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
                         <Button 
                             onClick={onConfirm} 
                             className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm h-9 px-4"

@@ -1,9 +1,10 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ColumnSchema, ColumnType, Suggestion, SuggestionReport } from '../../types';
 import { AlertTriangle } from 'lucide-react';
 import { FixPanel } from '../editor/FixPanel'; 
 import { ColumnHeader } from './ColumnHeader';
+import { Button } from '@/components/ui/button';
 
 interface VirtualizedTableProps {
   rowCount: number;
@@ -37,20 +38,52 @@ export function VirtualizedTable({
   
   // Minimal state to toggle the sidebar
   const [fixingColumn, setFixingColumn] = useState<number | null>(null);
+  const [filterMode, setFilterMode] = useState<'all' | 'errors'>('all');
 
   // FORCE UPDATE: The hook's cache is a Ref, so it won't trigger re-renders automatically.
   // We use this to tell React "The data is ready, paint it."
   const [, setTick] = useState(0);
   const forceUpdate = useCallback(() => setTick(t => t + 1), []);
 
+  // Calculate error rows - errors Map is: Map<colIndex, Set<rowIndex>>
+  const errorRowIndices = useMemo(() => {
+    const errorRows = new Set<number>();
+    errors.forEach((rowIndices) => {
+      rowIndices.forEach((rowIndex) => {
+        errorRows.add(rowIndex);
+      });
+    });
+    return errorRows;
+  }, [errors]);
+
+  const errorRowCount = errorRowIndices.size;
+  const displayRowCount = filterMode === 'errors' ? errorRowCount : rowCount;
+  
+  // Create mapping for error-only mode
+  const errorRowMap = useMemo(() => {
+    if (filterMode === 'all') return null;
+    const sorted = Array.from(errorRowIndices).sort((a, b) => a - b);
+    const map = new Map<number, number>(); // display index -> actual row index
+    sorted.forEach((actualIndex, displayIndex) => {
+      map.set(displayIndex, actualIndex);
+    });
+    return map;
+  }, [filterMode, errorRowIndices]);
+
   const rowVirtualizer = useVirtualizer({
-    count: rowCount,
+    count: displayRowCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 35,
     overscan: 5,
   });
 
   const virtualItems = rowVirtualizer.getVirtualItems();
+
+  // Helper to get actual row index from display index
+  const getActualRowIndex = useCallback((displayIndex: number): number => {
+    if (filterMode === 'all') return displayIndex;
+    return errorRowMap?.get(displayIndex) ?? displayIndex;
+  }, [filterMode, errorRowMap]);
 
   // DATA LOADER
   useEffect(() => {
@@ -60,8 +93,9 @@ export function VirtualizedTable({
     const missingChunks = new Set<number>();
     
     for (const item of virtualItems) {
-      if (!getRow(item.index)) {
-        const chunkId = Math.floor(item.index / CHUNK_SIZE);
+      const actualRowIndex = getActualRowIndex(item.index);
+      if (!getRow(actualRowIndex)) {
+        const chunkId = Math.floor(actualRowIndex / CHUNK_SIZE);
         missingChunks.add(chunkId);
       }
     }
@@ -80,10 +114,40 @@ export function VirtualizedTable({
         })
         .catch(console.error);
     });
-  }, [virtualItems, getRow, fetchRows, forceUpdate]);
+  }, [virtualItems, getRow, fetchRows, forceUpdate, getActualRowIndex]);
 
   return (
-    <div className="absolute inset-0 flex h-full w-full bg-background group">
+    <div className="absolute inset-0 flex h-full w-full bg-background group flex-col">
+      {/* Filter Control */}
+      <div className="px-4 py-2 border-b bg-background flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground">View:</span>
+          <div className="inline-flex rounded-md border border-input bg-background" role="group">
+            <Button
+              variant={filterMode === 'all' ? 'default' : 'ghost'}
+              size="sm"
+              className="rounded-r-none border-r h-8 px-3 text-xs"
+              onClick={() => {
+                setFilterMode('all');
+                rowVirtualizer.scrollToIndex(0);
+              }}
+            >
+              All ({rowCount.toLocaleString()})
+            </Button>
+            <Button
+              variant={filterMode === 'errors' ? 'default' : 'ghost'}
+              size="sm"
+              className="rounded-l-none h-8 px-3 text-xs"
+              onClick={() => {
+                setFilterMode('errors');
+                rowVirtualizer.scrollToIndex(0);
+              }}
+            >
+              Errors ({errorRowCount.toLocaleString()})
+            </Button>
+          </div>
+        </div>
+      </div>
       
       {/* Grid Container */}
       <div 
@@ -99,11 +163,11 @@ export function VirtualizedTable({
           <div className="sticky top-0 z-20 flex bg-background border-b shadow-sm"
                style={{ minWidth: '100%' }}
           >
-             <div className="w-[50px] flex-shrink-0 flex items-center justify-center border-r px-2 font-mono text-xs text-muted-foreground bg-muted/50 h-[35px]">
+             <div className="w-[50px] flex-shrink-0 flex items-center justify-center border-r px-2 font-mono text-xs text-muted-foreground bg-muted/50 min-h-[56px]">
                #
              </div>
              {schema.map((col, i) => (
-               <div key={i} className="flex-1 min-w-[150px] border-r h-[35px]">
+               <div key={i} className="flex-1 min-w-[150px] border-r min-h-[56px]">
                  <ColumnHeader 
                     name={col.name}
                     type={col.detected_type}
@@ -124,7 +188,8 @@ export function VirtualizedTable({
             }}
           >
             {virtualItems.map((virtualRow) => {
-              const rowIndex = virtualRow.index;
+              const displayIndex = virtualRow.index;
+              const rowIndex = getActualRowIndex(displayIndex);
               const rowData = getRow(rowIndex);
               const rowErrors = errors.get(rowIndex);
               const hasError = rowErrors && rowErrors.size > 0;
