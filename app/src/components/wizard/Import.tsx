@@ -3,11 +3,13 @@ import { Upload, FileType, ArrowRight } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
+import { SchemaPreset } from '../../types';
+
 interface ImportProps {
   onFileSelect: (file: File) => void;
-  onPresetSelect: (preset: any) => void; // Update to receive the preset object
+  onPresetSelect: (preset: SchemaPreset) => void;
   isReady: boolean;
-  presets: any[]; // Add this prop
+  presets: SchemaPreset[];
 }
 
 export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, isReady, presets }) => {

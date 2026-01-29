@@ -1,15 +1,14 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, X, Wand2, Trash2 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { ColumnSchema } from '../../types';
 
 interface IssuesPanelProps {
   errors: Map<number, Set<number>>;
   schema: ColumnSchema[];
-  onApplyFix: (colIndex: number, type: 'clear' | 'remove_row') => void;
+  onApplyFix: (colIndex: number, type: 'clear' | 'revert') => void;
   onClose: () => void;
 }
 
@@ -67,8 +66,8 @@ export function IssuesPanel({ errors, schema, onApplyFix, onClose }: IssuesPanel
                     <Button variant="outline" size="sm" className="h-7 text-xs justify-start gap-1.5" onClick={() => onApplyFix(colIdx, 'clear')}>
                       <Wand2 size={12} /> Clear Cells
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs justify-start gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => onApplyFix(colIdx, 'remove_row')}>
-                      <Trash2 size={12} /> Delete Rows
+                    <Button variant="ghost" size="sm" className="h-7 text-xs justify-start gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => onApplyFix(colIdx, 'revert')}>
+                      <Trash2 size={12} /> Revert Column
                     </Button>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ColumnType, Suggestion, SuggestionReport } from '../../types';
-import { Eraser, RotateCcw, AlertTriangle, Wand2, ArrowRight, GitCommit } from 'lucide-react';
+import { Eraser, RotateCcw, AlertTriangle, Wand2, ArrowRight } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";

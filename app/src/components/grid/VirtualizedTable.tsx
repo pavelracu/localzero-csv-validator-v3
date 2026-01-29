@@ -1,10 +1,9 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ColumnSchema, ColumnType } from '../../types';
-import { AlertTriangle, Loader2 } from 'lucide-react';
-import { Button } from "@/components/ui/button";
-import { IssuesPanel } from '../editor/IssuesPanel'; 
-import { ColumnHeader } from './ColumnHeader'; // Re-using your header component
+import { ColumnSchema, ColumnType, Suggestion, SuggestionReport } from '../../types';
+import { AlertTriangle } from 'lucide-react';
+import { FixPanel } from '../editor/FixPanel'; 
+import { ColumnHeader } from './ColumnHeader';
 
 interface VirtualizedTableProps {
   rowCount: number;
@@ -15,7 +14,9 @@ interface VirtualizedTableProps {
   getRow: (index: number) => string[] | undefined;
   fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>; 
   onTypeChange: (colIndex: number, newType: ColumnType) => void;
-  onSelectFix: (colIndex: number) => void;
+  getSuggestions: (colIdx: number) => Promise<SuggestionReport[]>;
+  applySuggestion: (colIdx: number, suggestion: Suggestion) => Promise<void>;
+  applyCorrection: (colIdx: number, strategy: 'clear' | 'revert') => Promise<void>;
 }
 
 const CHUNK_SIZE = 50;
@@ -28,7 +29,9 @@ export function VirtualizedTable({
   getRow, 
   fetchRows, 
   onTypeChange, 
-  onSelectFix 
+  getSuggestions,
+  applySuggestion,
+  applyCorrection
 }: VirtualizedTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   
@@ -168,20 +171,27 @@ export function VirtualizedTable({
         </div>
       </div>
 
-      {/* Issues Sidebar (Conditional Render) */}
-      {fixingColumn !== null && (
-        <div className="w-[400px] border-l border-border flex-shrink-0 bg-background z-30 shadow-xl">
-            {/* NOTE: You need to pass the correct props to FixSidebar here.
-                We'll wire this up fully in the next step (Logic Phase).
-                For now, we just close it.
-            */}
-            <IssuesPanel 
-               errors={errors}
-               schema={schema}
-               onApplyFix={(colIdx, type) => console.log('Fix', colIdx, type)}
-               onClose={() => setFixingColumn(null)}
-            />
-        </div>
+      {/* Fix Panel (Conditional Render) */}
+      {fixingColumn !== null && schema[fixingColumn] && (
+        <FixPanel
+          column={{ name: schema[fixingColumn].name, type: schema[fixingColumn].detected_type }}
+          errorCount={errors.get(fixingColumn)?.size || 0}
+          onCorrection={(strategy) => {
+            applyCorrection(fixingColumn, strategy).then(() => {
+              // Force re-render after correction
+              forceUpdate();
+            });
+          }}
+          onGetSuggestions={() => getSuggestions(fixingColumn)}
+          onApplySuggestion={(suggestion) => {
+            applySuggestion(fixingColumn, suggestion).then(() => {
+              // Force re-render after suggestion applied
+              forceUpdate();
+            });
+          }}
+          onClose={() => setFixingColumn(null)}
+          open={fixingColumn !== null}
+        />
       )}
     </div>
   );

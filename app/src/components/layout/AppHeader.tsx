@@ -8,9 +8,6 @@ interface AppHeaderProps {
   pendingValidationCount: number;
   isValidating: boolean;
   onRunValidation: () => Promise<void>;
-  onSavePreset: () => void;           // Added
-  onLoadPreset: (preset: any) => void; // Added
-  presets: any[];                     // Added
 }
 
 export const AppHeader = ({ 

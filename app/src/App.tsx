@@ -4,7 +4,6 @@ import { VirtualizedTable } from './components/grid/VirtualizedTable';
 import { Import } from './components/wizard/Import';
 import { Mapping } from './components/wizard/Mapping';
 import { Loader2 } from 'lucide-react';
-import { Card } from "@/components/ui/card";
 import { AppHeader } from './components/layout/AppHeader';
 import { StatusBar } from './components/layout/StatusBar';
 import { SchemaStorage } from './lib/storage';
@@ -23,6 +22,8 @@ function App() {
     updateColumnType,
     runBatchValidation,
     applyCorrection,
+    getSuggestions,
+    applySuggestion,
     getRow,
     confirmSchema
   } = useDataStream();
@@ -68,9 +69,6 @@ function App() {
           await runBatchValidation();
           setIsValidating(false);
         }}
-        onSavePreset={handleSavePreset}
-        onLoadPreset={handleApplyPreset}
-        presets={presets} // Use the state variable here
       />
       
       <main className="flex-1 overflow-hidden relative flex flex-col">
@@ -102,7 +100,9 @@ function App() {
             getRow={getRow}
             fetchRows={fetchRows}
             onTypeChange={updateColumnType}
-            onSelectFix={(idx) => console.log('Fixing col:', idx)}
+            getSuggestions={getSuggestions}
+            applySuggestion={applySuggestion}
+            applyCorrection={applyCorrection}
           />
         )}
 

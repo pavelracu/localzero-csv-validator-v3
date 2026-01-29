@@ -1,6 +1,6 @@
 import React from 'react';
 import { ColumnSchema, ColumnType } from '../../types';
-import { Type, Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, FileType, Save } from 'lucide-react'; // Added Save
+import { Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, FileType, Save } from 'lucide-react'; // Added Save
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";

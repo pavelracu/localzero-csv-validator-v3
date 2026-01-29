@@ -208,26 +208,6 @@ pub fn apply_correction(col_idx: usize, strategy: &str) -> Result<usize, JsValue
 }
 
 #[wasm_bindgen]
-pub fn update_cell(row_idx: usize, col_idx: usize, value: String) -> Result<bool, JsValue> {
-    let mut store = DATASET.lock().unwrap();
-    if let Some(df) = store.as_mut() {
-        // 1. Update Patch
-        df.patches
-            .entry(row_idx)
-            .or_insert_with(HashMap::new)
-            .insert(col_idx, value.clone());
-            
-        // 2. Validate
-        let col_type = &df.columns[col_idx].detected_type;
-        let is_valid = col_type.is_valid(&value);
-        
-        Ok(is_valid)
-    } else {
-         Err(JsValue::from_str("No dataset loaded"))
-    }
-}
-
-#[wasm_bindgen]
 pub fn validate_column(col_idx: usize, type_name: &str) -> Result<Vec<usize>, JsValue> {
     let mut store = DATASET.lock().unwrap();
     
