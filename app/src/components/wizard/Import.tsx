@@ -5,11 +5,12 @@ import { Button } from "@/components/ui/button";
 
 interface ImportProps {
   onFileSelect: (file: File) => void;
-  onPresetSelect: (presetId: string) => void;
+  onPresetSelect: (preset: any) => void; // Update to receive the preset object
   isReady: boolean;
+  presets: any[]; // Add this prop
 }
 
-export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, isReady }) => {
+export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, isReady, presets }) => {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -83,15 +84,15 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, onPresetSelect, is
 
         {/* Presets - Keeping it simple for now */}
         <div className="grid grid-cols-2 gap-4">
-            {['Weekly Sales Report', 'Q3 Customer Data'].map((name, i) => (
-                <Button key={i} variant="outline" className="justify-between h-auto py-4" onClick={() => onPresetSelect('demo')}>
-                    <span className="flex items-center gap-2">
-                        <FileType size={16} className="text-muted-foreground" />
-                        {name}
-                    </span>
-                    <ArrowRight size={14} className="text-muted-foreground" />
-                </Button>
-            ))}
+          {presets.map((preset, i) => (
+            <Button key={i} variant="outline" className="justify-between h-auto py-4" onClick={() => onPresetSelect(preset)}>
+              <span className="flex items-center gap-2">
+                <FileType size={16} className="text-muted-foreground" />
+                {preset.name}
+              </span>
+              <ArrowRight size={14} className="text-muted-foreground" />
+            </Button>
+          ))}
         </div>
       </div>
     </div>

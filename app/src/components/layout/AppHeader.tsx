@@ -3,11 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Play } from "lucide-react";
 
 interface AppHeaderProps {
-    isReady: boolean;
-    stage: string;
-    pendingValidationCount: number;
-    isValidating: boolean;
-    onRunValidation: () => void;
+  isReady: boolean;
+  stage: string;
+  pendingValidationCount: number;
+  isValidating: boolean;
+  onRunValidation: () => Promise<void>;
+  onSavePreset: () => void;           // Added
+  onLoadPreset: (preset: any) => void; // Added
+  presets: any[];                     // Added
 }
 
 export const AppHeader = ({ 

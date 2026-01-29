@@ -1,6 +1,6 @@
 import React from 'react';
 import { ColumnSchema, ColumnType } from '../../types';
-import { Type, Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, FileType } from 'lucide-react'; // Added FileType
+import { Type, Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, FileType, Save } from 'lucide-react'; // Added Save
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -10,6 +10,7 @@ interface MappingProps {
     sampleRows: Record<number, string[]>;
     onTypeChange: (colIndex: number, newType: ColumnType) => void;
     onConfirm: () => void;
+    onSavePreset: () => void; // Added prop
 }
 
 const TYPE_ICONS: Record<ColumnType, React.ReactNode> = {
@@ -28,7 +29,8 @@ export const Mapping: React.FC<MappingProps> = ({
     schema, 
     sampleRows, 
     onTypeChange, 
-    onConfirm 
+    onConfirm,
+    onSavePreset // Destructure prop
 }) => {
     
     const getSampleValues = (colIndex: number) => {
@@ -86,13 +88,27 @@ export const Mapping: React.FC<MappingProps> = ({
                         <h2 className="text-lg font-bold">Map Columns</h2>
                         <p className="text-xs text-muted-foreground">Define data types for validation</p>
                     </div>
-                    <Button onClick={onConfirm} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm">
-                        <Check size={16} />
-                        Confirm Schema
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={onSavePreset} 
+                            className="gap-2 h-9"
+                        >
+                            <Save size={16} />
+                            Save as Preset
+                        </Button>
+                        <Button 
+                            onClick={onConfirm} 
+                            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm h-9 px-4"
+                        >
+                            <Check size={16} />
+                            Confirm Schema
+                        </Button>
+                    </div>
                 </div>
                 
-                <div className="flex-1 overflow-x-auto overflow-y-hidden p-4 bg-muted/5">
+                <div className="flex-1 overflow-x-auto min-h-0 p-4 bg-muted/5">
                     <div className="flex gap-4 h-full pb-2">
                         {schema.map((col, idx) => (
                             <Card key={idx} className="w-[280px] shrink-0 flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">

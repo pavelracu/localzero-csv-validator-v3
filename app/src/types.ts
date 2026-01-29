@@ -22,3 +22,10 @@ export interface SuggestionReport {
     example_before: string;
     example_after: string;
 }
+
+export interface SchemaPreset {
+    id: string;
+    name: string;
+    mapping: Record<string, ColumnType>; // ColumnName -> Type mapping
+    lastUsed: number;
+}

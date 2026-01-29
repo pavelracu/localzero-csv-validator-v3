@@ -7,6 +7,8 @@ import { Loader2 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { AppHeader } from './components/layout/AppHeader';
 import { StatusBar } from './components/layout/StatusBar';
+import { SchemaStorage } from './lib/storage';
+import { SchemaPreset } from './types';
 
 function App() {
   const { 
@@ -21,118 +23,100 @@ function App() {
     updateColumnType,
     runBatchValidation,
     applyCorrection,
-    getSuggestions,
-    applySuggestion,
     getRow,
     confirmSchema
   } = useDataStream();
 
   const [isValidating, setIsValidating] = useState(false);
   const [architectSamples, setArchitectSamples] = useState<Record<number, string[]>>({});
-  const [fixingColumn, setFixingColumn] = useState<number | null>(null);
 
   useEffect(() => {
     if (stage === 'ARCHITECT' && rowCount > 0) {
-        fetchRows(0, 10).then(rows => {
-            setArchitectSamples(rows);
-        });
+        fetchRows(0, 10).then(rows => setArchitectSamples(rows));
     }
   }, [stage, rowCount, fetchRows]);
 
-  const handleFileSelect = async (file: File) => {
-    try {
-      await loadFile(file);
-    } catch (err) {
-      console.error("Error loading file:", err);
-      alert("Failed to parse CSV file.");
+  const [presets, setPresets] = useState<SchemaPreset[]>(SchemaStorage.list());
+
+  // Update the save handler
+  const handleSavePreset = () => {
+    const name = prompt("Name this preset (e.g., 'Monthly Sales'):");
+    if (name) {
+      SchemaStorage.save(name, schema);
+      // Update local state instead of reloading the page
+      setPresets(SchemaStorage.list()); 
+      alert("Preset saved locally.");
     }
   };
 
-  const handlePresetSelect = async (presetId: string) => {
-     alert(`Preset ${presetId} selected (Functionality mocked)`);
-     console.log("Preset selected:", presetId);
+  const handleApplyPreset = (preset: SchemaPreset) => {
+    schema.forEach((col, idx) => {
+        const savedType = preset.mapping[col.name];
+        if (savedType) updateColumnType(idx, savedType);
+    });
   };
-  
-  const handleRunValidation = async () => {
-    setIsValidating(true);
-    await runBatchValidation();
-    setIsValidating(false);
-  };
-
-  const showStatusBar = stage === 'ARCHITECT' || stage === 'STUDIO' || stage === 'PROCESSING';
-
-  const selectedColumnForFix = fixingColumn !== null && schema[fixingColumn]
-  ? { 
-      index: fixingColumn, 
-      schema: schema[fixingColumn],
-      errorCount: errors.get(fixingColumn)?.size || 0,
-    } 
-  : null;
-
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-background font-sans">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-background">
       <AppHeader 
         isReady={isReady}
         stage={stage}
         pendingValidationCount={pendingValidation.size}
         isValidating={isValidating}
-        onRunValidation={handleRunValidation}
+        onRunValidation={async () => {
+          setIsValidating(true);
+          await runBatchValidation();
+          setIsValidating(false);
+        }}
+        onSavePreset={handleSavePreset}
+        onLoadPreset={handleApplyPreset}
+        presets={presets} // Use the state variable here
       />
       
-     <main className="flex-1 overflow-hidden relative flex flex-col">
-  
-  {/* Stage 1: Import */}
-  {stage === 'IMPORT' && (
-    <div className="h-full w-full">
-      <Import 
-        onFileSelect={handleFileSelect}
-        onPresetSelect={handlePresetSelect}
-        isReady={isReady}
-      />
-    </div>
-  )}
+      <main className="flex-1 overflow-hidden relative flex flex-col">
+        {stage === 'IMPORT' && (
+          <Import 
+            onFileSelect={loadFile}
+            onPresetSelect={handleApplyPreset} // Use the actual application logic
+            isReady={isReady}
+            presets={presets} // Pass the dynamic list from state
+          />
+        )}
 
-  {/* Stage 2: Mapping (Was SchemaArchitect) */}
-  {stage === 'ARCHITECT' && (
-    <div className="h-full w-full overflow-hidden">
-       <Mapping
+        {stage === 'ARCHITECT' && (
+        <Mapping
           schema={schema}
-          sampleRows={architectSamples} // Ensure this matches your hook's return value
+          sampleRows={architectSamples}
           onTypeChange={updateColumnType}
-          onConfirm={confirmSchema} // Ensure this matches your hook's return value
-       />
-    </div>
-  )}
+          onConfirm={confirmSchema}
+          onSavePreset={handleSavePreset} // Pass it here
+        />
+      )}
 
-  {/* Stage 3: Editor (Was Studio) */}
-  {stage === 'STUDIO' && (
-    <div className="h-full w-full">
-<VirtualizedTable 
-   rowCount={rowCount}
-   schema={schema}
-   errors={errors}
-   pendingValidation={pendingValidation} // Pass this from hook
-   getRow={getRow} // Critical
-   fetchRows={fetchRows}
-   onTypeChange={updateColumnType}
-   onSelectFix={setFixingColumn} // Handled internally by Table now, or lift state up
-/>
-    </div>
-  )}
+        {stage === 'STUDIO' && (
+          <VirtualizedTable 
+            rowCount={rowCount}
+            schema={schema}
+            errors={errors}
+            pendingValidation={pendingValidation}
+            getRow={getRow}
+            fetchRows={fetchRows}
+            onTypeChange={updateColumnType}
+            onSelectFix={(idx) => console.log('Fixing col:', idx)}
+          />
+        )}
 
-  {/* Processing State */}
-  {stage === 'PROCESSING' && (
-     <div className="h-full flex flex-col items-center justify-center">
-        <Card className="p-8 flex flex-col items-center">
-          <Loader2 size={32} className="animate-spin mb-4 text-primary"/>
-          <p>Processing {rowCount.toLocaleString()} rows...</p>
-        </Card>
-     </div>
-  )}
-</main>
+        {stage === 'PROCESSING' && (
+           <div className="h-full flex flex-col items-center justify-center">
+              <Loader2 className="animate-spin text-primary mb-2" />
+              <p>Validating {rowCount.toLocaleString()} rows...</p>
+           </div>
+        )}
+      </main>
 
-      {showStatusBar && <StatusBar rowCount={rowCount} errorCount={errors.size} />}
+      {['ARCHITECT', 'STUDIO'].includes(stage) && (
+        <StatusBar rowCount={rowCount} errorCount={errors.size} />
+      )}
     </div>
   );
 }
