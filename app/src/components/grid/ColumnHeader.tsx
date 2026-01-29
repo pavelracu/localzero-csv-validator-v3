@@ -24,7 +24,7 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
     onSelectFix,
 }) => {
     return (
-        <div className={`flex flex-col items-stretch justify-center gap-2 p-2 min-h-[56px] border-b relative transition-colors ${
+        <div className={`flex flex-col items-stretch justify-center gap-2 p-2 min-h-[56px] w-full box-border relative transition-colors ${
             isPending 
                 ? 'bg-amber-50 border-t-4 border-t-amber-400 border-b-amber-200' 
                 : errorCount > 0 

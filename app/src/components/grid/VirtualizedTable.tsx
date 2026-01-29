@@ -155,19 +155,23 @@ export function VirtualizedTable({
         className="flex-1 h-full overflow-auto"
         style={{ contain: 'strict' }}
       >
-        <div 
-          className="relative w-full"
-          style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        <div
+          className="relative"
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            minWidth: `${50 + schema.length * 150}px`,
+          }}
         >
-          {/* Header */}
-          <div className="sticky top-0 z-20 flex bg-background border-b shadow-sm"
-               style={{ minWidth: '100%' }}
+          {/* Header — fixed width per column so header and body align when scrolling */}
+          <div
+            className="sticky top-0 z-20 flex bg-background border-b shadow-sm min-h-[56px]"
+            style={{ minWidth: `${50 + schema.length * 150}px` }}
           >
-             <div className="w-[50px] flex-shrink-0 flex items-center justify-center border-r px-2 font-mono text-xs text-muted-foreground bg-muted/50 min-h-[56px]">
+             <div className="w-[50px] flex-shrink-0 flex items-center justify-center border-r border-border px-2 font-mono text-xs text-muted-foreground bg-muted/50 min-h-[56px]">
                #
              </div>
              {schema.map((col, i) => (
-               <div key={i} className="flex-1 min-w-[150px] border-r min-h-[56px]">
+               <div key={i} className="w-[150px] min-w-[150px] flex-shrink-0 border-r border-border min-h-[56px]">
                  <ColumnHeader 
                     name={col.name}
                     type={col.detected_type}
@@ -182,43 +186,42 @@ export function VirtualizedTable({
 
           {/* Body */}
           <div
-            className="absolute top-0 left-0 w-full"
+            className="absolute top-0 left-0"
             style={{
               transform: `translateY(${virtualItems[0]?.start || 0}px)`,
+              minWidth: `${50 + schema.length * 150}px`,
             }}
           >
             {virtualItems.map((virtualRow) => {
               const displayIndex = virtualRow.index;
               const rowIndex = getActualRowIndex(displayIndex);
               const rowData = getRow(rowIndex);
-              const rowErrors = errors.get(rowIndex);
-              const hasError = rowErrors && rowErrors.size > 0;
+              // errors Map is Map<colIndex, Set<rowIndex>> — check per cell
+              const rowHasAnyError = schema.some((_, colIndex) => errors.get(colIndex)?.has(rowIndex));
 
               return (
                 <div 
                   key={virtualRow.key} 
                   data-index={virtualRow.index}
                   ref={rowVirtualizer.measureElement}
-                  className={`flex w-full border-b border-border hover:bg-muted/50 h-[35px]`}
+                  className="flex border-b border-border hover:bg-muted/50 h-[35px]"
+                  style={{ minWidth: `${50 + schema.length * 150}px` }}
                 >
-                   {/* Row Number */}
-                   <div className={`
-                      w-[50px] flex-shrink-0 flex items-center justify-center border-r font-mono text-[10px] text-muted-foreground
-                      ${hasError ? 'bg-red-50 text-red-600 font-bold' : 'bg-background'}
-                   `}>
-                     {hasError ? <AlertTriangle size={12} /> : rowIndex + 1}
+                   {/* Row Number — only show icon when row has error, no full-row highlight */}
+                   <div className="w-[50px] flex-shrink-0 flex items-center justify-center border-r font-mono text-[10px] text-muted-foreground bg-background">
+                     {rowHasAnyError ? <AlertTriangle size={12} className="text-amber-500" /> : rowIndex + 1}
                    </div>
 
-                   {/* Cells */}
+                   {/* Cells — highlight only the cell that has an error */}
                    {schema.map((_, colIndex) => {
                      const cellValue = rowData?.[colIndex];
-                     const isCellError = rowErrors?.has(colIndex);
+                     const isCellError = errors.get(colIndex)?.has(rowIndex) ?? false;
 
                      return (
                        <div 
                          key={colIndex}
                          className={`
-                           flex-1 min-w-[150px] px-3 flex items-center border-r text-xs truncate
+                           w-[150px] min-w-[150px] flex-shrink-0 px-3 flex items-center border-r border-border text-xs truncate
                            ${isCellError ? 'bg-red-50 ring-1 ring-inset ring-red-200 text-red-700' : ''}
                          `}
                          title={isCellError ? "Validation Error" : cellValue}
