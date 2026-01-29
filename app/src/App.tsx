@@ -108,13 +108,16 @@ function App() {
   {/* Stage 3: Editor (Was Studio) */}
   {stage === 'STUDIO' && (
     <div className="h-full w-full">
-      <VirtualizedTable 
-         rowCount={rowCount}
-         schema={schema}
-         errors={errors}
-         fetchRows={fetchRows}
-         onCorrection={applyCorrection}
-      />
+<VirtualizedTable 
+   rowCount={rowCount}
+   schema={schema}
+   errors={errors}
+   pendingValidation={pendingValidation} // Pass this from hook
+   getRow={getRow} // Critical
+   fetchRows={fetchRows}
+   onTypeChange={updateColumnType}
+   onSelectFix={setFixingColumn} // Handled internally by Table now, or lift state up
+/>
     </div>
   )}
 
