@@ -49,6 +49,36 @@ export function useDataStream(): UseDataStreamReturn {
                     request.resolve(payload);
                     pendingRequests.current.delete(id);
                 }
+            } else if (type === 'VALIDATION_UPDATE') {
+                setErrors(prev => {
+                    const next = new Map(prev);
+                    if (payload instanceof Map) {
+                        payload.forEach((indices, colIdx) => {
+                            const set = next.get(colIdx) || new Set();
+                            indices.forEach((idx: number) => set.add(idx));
+                            next.set(colIdx, set);
+                        });
+                    } else {
+                         // Fallback for object/array
+                         // Assuming payload is { colIdx: [indices...] } or similar
+                         // If it comes from wasm-bindgen, it might be a Map.
+                         // But if it's an object:
+                         try {
+                             const entries = Object.entries(payload);
+                             entries.forEach(([key, val]) => {
+                                 const colIdx = Number(key);
+                                 const set = next.get(colIdx) || new Set();
+                                 if (Array.isArray(val) || val instanceof Uint32Array) {
+                                     (val as any).forEach((i: number) => set.add(i));
+                                 }
+                                 next.set(colIdx, set);
+                             });
+                         } catch (e) { console.error("Error parsing validation update", e); }
+                    }
+                    return next;
+                });
+            } else if (type === 'VALIDATION_COMPLETE') {
+                setStage('STUDIO');
             } else if (type === 'ERROR') {
                 console.error("Worker Error:", payload);
             }
@@ -208,12 +238,12 @@ export function useDataStream(): UseDataStreamReturn {
     const confirmSchema = useCallback(async () => {
         setStage('PROCESSING');
         setInitialSchema(JSON.parse(JSON.stringify(schema)));
+        setErrors(new Map());
         
-        const allIndices = schema.map((_, i) => i);
-        await validateColumnsSafe(allIndices);
-        
-        setStage('STUDIO');
-    }, [schema, validateColumnsSafe]);
+        if (workerRef.current) {
+            workerRef.current.postMessage({ type: 'START_VALIDATION' });
+        }
+    }, [schema]);
 
     const applyFix = useCallback(async (colIdx: number, strategy: string) => {
          if (!workerRef.current) return;

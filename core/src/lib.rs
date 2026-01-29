@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
+use regex::Regex;
 
 mod engine;
 use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}};
@@ -9,6 +10,10 @@ use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, Colum
 // GLOBAL STATE (The "Database" in Memory)
 lazy_static! {
     static ref DATASET: Mutex<Option<DataFrame>> = Mutex::new(None);
+    static ref RE_INTEGER: Regex = Regex::new(r"^-?\d+$").unwrap();
+    static ref RE_FLOAT: Regex = Regex::new(r"^-?\d*\.?\d+$").unwrap();
+    static ref RE_EMAIL: Regex = Regex::new(r"^[\w\-\.]+@([\w-]+\.)+[\w-]{2,4}$").unwrap();
+    static ref RE_PHONE_US: Regex = Regex::new(r"^\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})$").unwrap();
 }
 
 #[wasm_bindgen]
@@ -87,26 +92,44 @@ pub fn get_rows(start: usize, limit: usize) -> Result<JsValue, JsValue> {
     }
 }
 
+pub fn validate_cell_optimized(value: &str, col_type: &ColumnType) -> bool {
+    if value.is_empty() { return true; } // Assume empty is valid or handle separately
+    
+    match col_type {
+        ColumnType::Text => true,
+        ColumnType::Integer => RE_INTEGER.is_match(value),
+        ColumnType::Float => RE_FLOAT.is_match(value),
+        ColumnType::Boolean => value == "true" || value == "false",
+        ColumnType::Email => RE_EMAIL.is_match(value),
+        ColumnType::PhoneUS => RE_PHONE_US.is_match(value),
+        _ => true,
+    }
+}
+
 #[wasm_bindgen]
 pub fn validate_chunk(start_row: usize, limit: usize) -> Result<JsValue, JsValue> {
     let store = DATASET.lock().unwrap();
     if let Some(df) = &*store {
         let end = std::cmp::min(start_row + limit, df.rows);
-        // Map<ColIndex, Vec<RowIndex>>
-        let mut col_errors: HashMap<usize, Vec<usize>> = HashMap::new();
+        
+        // Use a flat vector for speed: [row_idx, col_idx, row_idx, col_idx...]
+        let mut error_flat_list: Vec<usize> = Vec::with_capacity(limit); 
 
         for row_idx in start_row..end {
-            for col_idx in 0..df.columns.len() {
-                 if let Some(val) = df.get_cell(row_idx, col_idx) {
-                     let col_type = &df.columns[col_idx].detected_type;
-                     if !col_type.is_valid(&val) {
-                         col_errors.entry(col_idx).or_insert_with(Vec::new).push(row_idx);
-                     }
-                 }
+            if let Some(row_values) = df.get_row(row_idx) {
+                for (col_idx, val) in row_values.iter().enumerate() {
+                    let col_type = &df.columns[col_idx].detected_type;
+                    
+                    // Fast Check
+                    if !validate_cell_optimized(val, col_type) {
+                        error_flat_list.push(row_idx);
+                        error_flat_list.push(col_idx);
+                    }
+                }
             }
         }
         
-        Ok(serde_wasm_bindgen::to_value(&col_errors)?)
+        Ok(serde_wasm_bindgen::to_value(&error_flat_list)?)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
     }

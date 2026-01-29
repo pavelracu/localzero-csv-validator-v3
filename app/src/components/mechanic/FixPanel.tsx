@@ -15,7 +15,7 @@ interface FixPanelProps {
 export const FixPanel: React.FC<FixPanelProps> = ({ column, errorCount, onFix, onClose, open }) => {
     return (
         <Sheet open={open} onOpenChange={(val) => !val && onClose()}>
-            <SheetContent side="right">
+            <SheetContent className="w-[400px] sm:w-[540px]">
                 <SheetHeader>
                     <SheetTitle className="flex items-center gap-2 text-destructive">
                         <AlertTriangle size={20} />
@@ -28,11 +28,11 @@ export const FixPanel: React.FC<FixPanelProps> = ({ column, errorCount, onFix, o
                 
                 <div className="mt-8 space-y-4">
                      <Button 
-                        variant="outline" 
+                        variant="destructive" 
                         className="w-full justify-start gap-4 h-auto p-4"
                         onClick={() => onFix('clear')}
                      >
-                         <div className="bg-muted p-2 rounded text-foreground">
+                         <div className="bg-white/20 p-2 rounded text-white">
                             <Eraser size={20} />
                          </div>
                          <div className="text-left">

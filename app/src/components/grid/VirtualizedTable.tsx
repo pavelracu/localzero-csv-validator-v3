@@ -120,7 +120,7 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
                             {headerGroup.headers.map(header => (
                                 <th 
                                     key={header.id} 
-                                    className="p-0 border-r border-b border-gray-200 bg-gray-50 align-top flex-1 min-w-[150px]"
+                                    className="h-10 px-4 text-left align-middle font-medium text-muted-foreground bg-muted/50 border-b border-border flex-1 min-w-[150px]"
                                     style={{ width: header.getSize() }}
                                 >
                                     {header.isPlaceholder
@@ -149,7 +149,7 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
                                 key={virtualRow.key} 
                                 data-index={virtualRow.index} 
                                 ref={rowVirtualizer.measureElement}
-                                className="flex w-full hover:bg-gray-50"
+                                className="flex w-full border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
                                 style={{ height: `${virtualRow.size}px` }}
                             >
                                 {table.getVisibleFlatColumns().map(column => {
@@ -160,14 +160,15 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
                                     return (
                                         <td
                                             key={column.id}
-                                            className={`p-2 text-sm border-r border-gray-100 truncate flex-1 min-w-[150px] font-mono ${
-                                                isError 
-                                                    ? 'bg-red-50 text-red-900 border-b border-red-100 decoration-red-500 underline decoration-dashed' 
-                                                    : 'text-gray-600'
+                                            className={`relative p-2 text-sm border-r border-border truncate flex-1 min-w-[150px] font-mono ${
+                                                isError ? 'text-foreground' : 'text-muted-foreground'
                                             }`}
-                                            title={cellValue}
+                                            title={isError ? `Error: ${cellValue}` : cellValue}
                                             style={{ width: column.getSize() }}
                                         >
+                                            {isError && (
+                                                <div className="absolute top-0 right-0 w-0 h-0 border-l-[8px] border-l-transparent border-t-[8px] border-t-destructive" />
+                                            )}
                                             {/* We manually render because table.getRowModel is empty */}
                                             {cellValue}
                                         </td>
