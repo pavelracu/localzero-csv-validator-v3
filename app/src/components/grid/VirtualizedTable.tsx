@@ -1,199 +1,134 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  createColumnHelper,
-} from '@tanstack/react-table';
+import React, { useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ColumnSchema, ColumnType, Suggestion, SuggestionReport } from '../../types';
-import { ColumnHeader } from './ColumnHeader';
+import { ColumnSchema, ColumnType } from '../../types';
+import { AlertTriangle, MoreHorizontal, Filter } from 'lucide-react';
+import { IssuesPanel } from '../editor/IssuesPanel'; // Import the new panel
+import { Button } from '../ui/button';
 
 interface VirtualizedTableProps {
   rowCount: number;
   schema: ColumnSchema[];
-  errors: Map<number, Set<number>>;
-  pendingValidation: Set<number>;
-  fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>;
-  onTypeChange: (colIndex: number, newType: ColumnType) => void;
-  onSelectFix: (colIndex: number) => void;
-  getRow: (index: number) => string[] | undefined;
+  errors: Map<number, Record<string, string>>;
+  fetchRows: (start: number, end: number) => string[][];
+  onCorrection: (colIndex: number, type: 'clear' | 'remove_row') => void;
 }
 
-const CHUNK_SIZE = 50;
-
-export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
-  rowCount,
-  schema,
-  errors,
-  pendingValidation,
-  fetchRows,
-  onTypeChange,
-  onSelectFix,
-  getRow,
-}) => {
+export function VirtualizedTable({ rowCount, schema, errors, fetchRows, onCorrection }: VirtualizedTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
-  // Force update trigger
-  const [, setTick] = useState(0);
-  const requestedChunks = useRef<Set<number>>(new Set());
+  const [showIssues, setShowIssues] = useState(true);
 
+  // Virtualizer Setup
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 35,
-    overscan: 10,
+    estimateSize: () => 32, // High density row height (32px)
+    overscan: 20,
   });
 
-  const virtualItems = rowVirtualizer.getVirtualItems();
-
-  useEffect(() => {
-    if (rowCount === 0) return;
-    
-    // Determine missing chunks
-    const neededChunks = new Set<number>();
-    
-    virtualItems.forEach(item => {
-        if (!getRow(item.index)) {
-            const chunkId = Math.floor(item.index / CHUNK_SIZE);
-            if (!requestedChunks.current.has(chunkId)) {
-                neededChunks.add(chunkId);
-            }
-        }
-    });
-
-    if (neededChunks.size > 0) {
-        // Mark as requested immediately
-        neededChunks.forEach(c => requestedChunks.current.add(c));
-        
-        const chunks = Array.from(neededChunks).sort((a, b) => a - b);
-        
-        // Fetch contiguous ranges to be polite to the worker
-        // Simple approach: just fetch min to max (might over-fetch slightly but efficient)
-        const minChunk = chunks[0];
-        const maxChunk = chunks[chunks.length - 1];
-        
-        const fetchStart = minChunk * CHUNK_SIZE;
-        const fetchLimit = (maxChunk - minChunk + 1) * CHUNK_SIZE;
-
-        // console.log(`Fetching range ${fetchStart} - ${fetchStart + fetchLimit}`);
-
-        fetchRows(fetchStart, fetchLimit)
-            .then(() => {
-                // Data is in the ref cache now. Trigger render.
-                setTick(t => t + 1);
-            })
-            .catch(err => {
-                console.error("Fetch failed", err);
-                // Clear requested flags on error so we try again? 
-                // Or keep them to avoid death loop. keeping them is safer.
-            });
-    }
-  }, [virtualItems, rowCount, fetchRows, getRow]);
-
-  const columnHelper = createColumnHelper<string[]>();
-
-  const columns = useMemo(() => {
-    return schema.map((col, index) => 
-      columnHelper.accessor(row => row ? row[index] : '', {
-        id: index.toString(),
-        header: () => (
-          <ColumnHeader
-            name={col.name}
-            type={col.detected_type}
-            isPending={pendingValidation.has(index)}
-            errorCount={errors.get(index)?.size || 0}
-            onTypeChange={(newType) => onTypeChange(index, newType)}
-            onSelectFix={() => onSelectFix(index)}
-          />
-        ),
-        cell: (info) => info.getValue(),
-      })
-    );
-  }, [schema, onTypeChange, pendingValidation, errors, onSelectFix]);
-
-  const table = useReactTable({
-    data: [],
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
+  // Data Loading Logic (Simplified for brevity - assumes sync or cached for now)
+  const items = rowVirtualizer.getVirtualItems();
+  const loadedRows = fetchRows(items[0]?.index || 0, items[items.length - 1]?.index || 0);
 
   return (
-    <div 
+    // FIX: 'absolute inset-0' forces this container to fill the relative parent in App.tsx
+    <div className="absolute inset-0 flex h-full w-full bg-background group">
+      
+      {/* Grid Area */}
+      <div 
         ref={parentRef} 
-        className="overflow-auto h-full w-full relative"
-    >
-        <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
-            <table className="w-full text-left border-collapse" style={{ tableLayout: 'fixed' }}>
-                <thead className="bg-background sticky top-0 z-20 shadow-sm">
-                    {table.getHeaderGroups().map(headerGroup => (
-                        <tr key={headerGroup.id} className="flex w-full">
-                            {headerGroup.headers.map(header => (
-                                                                <th
-                                                                    key={header.id}
-                                                                    className="px-4 text-left align-middle font-medium text-muted-foreground bg-background border-b border-border flex-1 min-w-[150px]"
-                                                                    style={{ width: header.getSize() }}
-                                                                >                                    {header.isPlaceholder
-                                        ? null
-                                        : flexRender(header.column.columnDef.header, header.getContext())}
-                                </th>
-                            ))}
-                        </tr>
-                    ))}
-                </thead>
-                <tbody 
-                    style={{
-                        transform: `translateY(${virtualItems[0]?.start ?? 0}px)`, 
-                        position: 'absolute', 
-                        top: 0, 
-                        left: 0,
-                        width: '100%'
-                    }}
-                >
-                    {virtualItems.map(virtualRow => {
-                        const rowIndex = virtualRow.index;
-                        const rowData = getRow(rowIndex);
-                        
-                        return (
-                            <tr 
-                                key={virtualRow.key} 
-                                data-index={virtualRow.index} 
-                                ref={rowVirtualizer.measureElement}
-                                className="flex w-full border-b border-border transition-colors hover:bg-muted/50"
-                                style={{ height: `${virtualRow.size}px` }}
-                            >
-                                {table.getVisibleFlatColumns().map(column => {
-                                    const colIndex = parseInt(column.id);
-                                    // Use raw array access for speed
-                                    const cellValue = rowData ? rowData[colIndex] : null;
-                                    const isLoading = cellValue === null || cellValue === undefined;
-                                    const isError = errors.get(colIndex)?.has(rowIndex);
-                                    
-                                    return (
-                                        <td
-                                            key={column.id}
-                                            className={`relative p-1 text-sm border-r border-border truncate flex-1 min-w-[150px] font-mono ${
-                                                isError ? 'text-foreground bg-red-50/30' : 'text-muted-foreground'
-                                            }`}
-                                            title={!isLoading && isError ? `Error: ${cellValue}` : (cellValue || "")}
-                                            style={{ width: column.getSize() }}
-                                        >
-                                            {isError && (
-                                                <div className="absolute top-0 right-0 w-2 h-2 rounded-bl bg-destructive" />
-                                            )}
-                                            {isLoading ? (
-                                                <div className="h-4 w-2/3 bg-gray-100 animate-pulse rounded" />
-                                            ) : (
-                                                cellValue
-                                            )}
-                                        </td>
-                                    );
-                                })}
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
+        className="flex-1 h-full overflow-auto"
+        style={{ contain: 'strict' }}
+      >
+        <div 
+          className="relative w-full"
+          style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        >
+          {/* Sticky Header */}
+          <div className="sticky top-0 z-10 grid bg-muted border-b shadow-sm"
+               style={{ 
+                 gridTemplateColumns: `50px ${schema.map(() => 'minmax(150px, 1fr)').join(' ')}`,
+                 height: '32px'
+               }}
+          >
+             <div className="flex items-center justify-center border-r px-2 font-mono text-xs text-muted-foreground bg-muted">
+               #
+             </div>
+             {schema.map((col, i) => (
+               <div key={i} className="flex items-center justify-between px-3 border-r text-xs font-semibold text-foreground bg-muted truncate group/header">
+                 <span className="truncate">{col.name}</span>
+                 <MoreHorizontal size={14} className="opacity-0 group-hover/header:opacity-50" />
+               </div>
+             ))}
+          </div>
+
+          {/* Data Rows */}
+          <div
+            className="absolute top-0 left-0 w-full grid"
+            style={{
+              transform: `translateY(${items[0]?.start || 0}px)`,
+              gridTemplateColumns: `50px ${schema.map(() => 'minmax(150px, 1fr)').join(' ')}`,
+            }}
+          >
+            {items.map((virtualRow) => {
+              const rowIndex = virtualRow.index;
+              const rowData = loadedRows[virtualRow.index - items[0].index];
+              const rowErrors = errors.get(rowIndex);
+              const hasError = !!rowErrors;
+
+              return (
+                <React.Fragment key={virtualRow.key}>
+                   {/* Row Index */}
+                   <div className={`
+                      h-8 flex items-center justify-center border-r border-b font-mono text-[10px] text-muted-foreground
+                      ${hasError ? 'bg-red-50 text-red-600 font-bold' : 'bg-background'}
+                   `}>
+                     {hasError ? <AlertTriangle size={12} /> : rowIndex + 1}
+                   </div>
+
+                   {/* Cells */}
+                   {schema.map((_, colIndex) => {
+                     const cellValue = rowData?.[colIndex] || '';
+                     const cellError = rowErrors?.[colIndex];
+
+                     return (
+                       <div 
+                         key={`${rowIndex}-${colIndex}`}
+                         className={`
+                           h-8 px-3 flex items-center border-r border-b text-xs truncate
+                           ${cellError ? 'bg-red-50 inset-ring inset-ring-red-200' : 'bg-background'}
+                         `}
+                         title={cellError || cellValue}
+                       >
+                         {cellValue}
+                       </div>
+                     );
+                   })}
+                </React.Fragment>
+              );
+            })}
+          </div>
         </div>
+      </div>
+
+      {/* Issues Sidebar */}
+      {showIssues && errors.size > 0 && (
+        <IssuesPanel 
+          errors={errors} 
+          schema={schema} 
+          onApplyFix={onCorrection}
+          onClose={() => setShowIssues(false)} 
+        />
+      )}
+
+      {/* Issues Trigger Button */}
+      {!showIssues && errors.size > 0 && (
+        <Button 
+          onClick={() => setShowIssues(true)}
+          className="absolute bottom-4 right-4 shadow-lg rounded-full h-10 w-10 p-0 z-30 bg-destructive text-white hover:bg-destructive/90"
+        >
+          <AlertTriangle size={20} />
+        </Button>
+      )}
     </div>
   );
-};
+}

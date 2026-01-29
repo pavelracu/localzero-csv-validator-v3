@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useDataStream } from './hooks/useDataStream';
 import { VirtualizedTable } from './components/grid/VirtualizedTable';
-import { ImportHub } from './components/wizard/ImportHub';
-import { SchemaArchitect } from './components/wizard/SchemaArchitect';
+import { Import } from './components/wizard/Import';
+import { Mapping } from './components/wizard/Mapping';
 import { Loader2 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { AppHeader } from './components/layout/AppHeader';
 import { StatusBar } from './components/layout/StatusBar';
-import { FixSidebar } from './components/mechanic/FixSidebar';
 
 function App() {
   const { 
@@ -81,62 +80,54 @@ function App() {
         onRunValidation={handleRunValidation}
       />
       
-      <main className="flex-1 flex flex-col overflow-auto">
-         {stage === 'IMPORT' && (
-             <ImportHub 
-                onFileSelect={handleFileSelect} 
-                onPresetSelect={handlePresetSelect} 
-                isReady={isReady} 
-             />
-         )}
+     <main className="flex-1 overflow-hidden relative flex flex-col">
+  
+  {/* Stage 1: Import */}
+  {stage === 'IMPORT' && (
+    <div className="h-full w-full">
+      <Import 
+        onFileSelect={handleFileSelect}
+        onPresetSelect={handlePresetSelect}
+        isReady={isReady}
+      />
+    </div>
+  )}
 
-         {stage === 'ARCHITECT' && (
-             <SchemaArchitect 
-                schema={schema} 
-                sampleRows={architectSamples}
-                onTypeChange={updateColumnType}
-                onConfirm={confirmSchema}
-             />
-         )}
+  {/* Stage 2: Mapping (Was SchemaArchitect) */}
+  {stage === 'ARCHITECT' && (
+    <div className="h-full w-full overflow-hidden">
+       <Mapping
+          schema={schema}
+          sampleRows={architectSamples} // Ensure this matches your hook's return value
+          onTypeChange={updateColumnType}
+          onConfirm={confirmSchema} // Ensure this matches your hook's return value
+       />
+    </div>
+  )}
 
-         {stage === 'PROCESSING' && (
-             <div className="flex-1 flex items-center justify-center">
-                <Card className="flex flex-col items-center justify-center p-8">
-                     <Loader2 size={48} className="text-primary animate-spin mb-4" />
-                     <h3 className="text-xl font-semibold text-foreground">Validating Data...</h3>
-                     <p className="text-muted-foreground">Processing {rowCount.toLocaleString()} rows against your schema</p>
-                </Card>
-             </div>
-         )}
+  {/* Stage 3: Editor (Was Studio) */}
+  {stage === 'STUDIO' && (
+    <div className="h-full w-full">
+      <VirtualizedTable 
+         rowCount={rowCount}
+         schema={schema}
+         errors={errors}
+         fetchRows={fetchRows}
+         onCorrection={applyCorrection}
+      />
+    </div>
+  )}
 
-         {stage === 'STUDIO' && (
-            <div className="flex-1 flex min-h-0">
-               <div className="flex-1 relative">
-                 <VirtualizedTable 
-                    rowCount={rowCount}
-                    schema={schema}
-                    errors={errors}
-                    pendingValidation={pendingValidation}
-                    fetchRows={fetchRows}
-                    onTypeChange={updateColumnType}
-                    onSelectFix={setFixingColumn}
-                    getRow={getRow}
-                 />
-               </div>
-                {fixingColumn !== null && (
-                    <div className="w-[400px] border-l border-border flex-shrink-0">
-                        <FixSidebar 
-                            selectedColumn={selectedColumnForFix}
-                            onCorrection={applyCorrection}
-                            onGetSuggestions={getSuggestions}
-                            onApplySuggestion={applySuggestion}
-                            onClose={() => setFixingColumn(null)}
-                        />
-                   </div>
-                )}
-            </div>
-         )}
-      </main>
+  {/* Processing State */}
+  {stage === 'PROCESSING' && (
+     <div className="h-full flex flex-col items-center justify-center">
+        <Card className="p-8 flex flex-col items-center">
+          <Loader2 size={32} className="animate-spin mb-4 text-primary"/>
+          <p>Processing {rowCount.toLocaleString()} rows...</p>
+        </Card>
+     </div>
+  )}
+</main>
 
       {showStatusBar && <StatusBar rowCount={rowCount} errorCount={errors.size} />}
     </div>
