@@ -1,13 +1,13 @@
 Markdown
 
-# LocalZero 🟢
+# LocalZero
 
 **The Privacy-First Data Onboarding Engine.**  
-_Process 1GB CSV files in the browser. Zero data exfiltration. Physics-bound speed._
+_Process 1M rows CSV files in the browser. Zero data exfiltration. Physics-bound speed._
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 LocalZero is an "Infrastructure-as-Software" product. It is deployed as a static Docker container within the customer's VPC.
 
@@ -29,7 +29,7 @@ We do not use standard `JSON.parse`. We use a shared memory model to prevent bro
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites & Installation
 
@@ -84,7 +84,7 @@ npm install
 npm run dev
 ```
 
-# App opens at http://localhost:5173
+## App opens at http://localhost:5173
 
 1.  Run the Full Container (Production Mode)
 
@@ -93,20 +93,23 @@ npm run dev
 docker run -p 8080:80 localzero:latest
 ```
 
-# Verify "Air Gap": Try sending a POST request to localhost:8080. It should fail (405).
+## Verify "Air Gap": Try sending a POST request to localhost:8080. It should fail (405).
 
-🛡️ Security Model  
+# Security Model  
 The "Sealed Room" Guarantee: LocalZero is designed to prove to a CISO that data cannot leave the browser.
 
 Network Isolation: The Nginx container is configured to reject all POST, PUT, and DELETE requests. It serves static assets only.  
 Memory Isolation: Data processing happens in Wasm memory. The raw CSV data never leaves the browser tab.  
 Export Safety: Exports are generated client-side via StreamSaver, saving directly to the user's disk.
 
-📂 Project Layout  
+### Project Layout
+```
 /core: The Rust library. This is where the "Mechanic" logic lives.  
 /app: The React application. Handles the Virtual Scroll and UI interactions.  
 /scripts: CI/CD automation scripts.
+```
 
-🧪 Testing  
-Rust (Logic): cd core && cargo test  
+### Testing  
+```Rust (Logic): cd core && cargo test  
 Wasm (Browser): cd core && wasm-pack test --headless --firefox
+```
