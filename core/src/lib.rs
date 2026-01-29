@@ -104,9 +104,13 @@ pub fn validate_chunk(start_row: usize, limit: usize) -> Result<JsValue, JsValue
 pub fn get_suggestions(col_idx: usize) -> Result<JsValue, JsValue> {
     let store = DATASET.lock().unwrap();
     if let Some(df) = &*store {
+        let col_type = format!("{:?}", df.columns.get(col_idx).map(|c| c.detected_type));
+        log(&format!("[get_suggestions] col_idx={} rows={} col_type={}", col_idx, df.rows, col_type));
         let reports = mechanic::analyze_column(df, col_idx);
+        log(&format!("[get_suggestions] returning {} suggestions", reports.len()));
         Ok(serde_wasm_bindgen::to_value(&reports)?)
     } else {
+        log("[get_suggestions] no dataset loaded");
         Err(JsValue::from_str("No dataset loaded"))
     }
 }
@@ -134,7 +138,21 @@ pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usiz
                         },
                         mechanic::Suggestion::DigitsOnly => {
                             old_val.chars().filter(|c| c.is_ascii_digit()).collect()
-                        }
+                        },
+                        mechanic::Suggestion::PhoneStripToTenDigits => {
+                            mechanic::normalize_phone_to_ten_digits(&old_val)
+                        },
+                        mechanic::Suggestion::NormalizeDateToIso => {
+                            let trimmed = old_val.trim();
+                            if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%m/%d/%Y") {
+                                d.format("%Y-%m-%d").to_string()
+                            } else {
+                                old_val.clone()
+                            }
+                        },
+                        mechanic::Suggestion::NormalizeBooleanCase => {
+                            old_val.trim().to_lowercase()
+                        },
                     };
 
                     if new_val != old_val && col_type.is_valid(&new_val) {

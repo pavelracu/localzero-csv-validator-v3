@@ -12,6 +12,10 @@ export interface UseDataStreamReturn {
     rowCount: number;
     errors: Map<number, Set<number>>;
     pendingValidation: Set<number>;
+    /** True while a file is being loaded (parsed locally). No data is uploaded. */
+    isLoadingFile: boolean;
+    /** Bumps when row data is invalidated (e.g. after apply fix). Table uses this to refetch visible rows. */
+    dataVersion: number;
     loadFile: (file: File) => Promise<void>;
     fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>;
     updateColumnType: (colIdx: number, newType: ColumnType) => Promise<void>;
@@ -31,7 +35,9 @@ export function useDataStream(): UseDataStreamReturn {
     const [rowCount, setRowCount] = useState(0);
     const [errors, setErrors] = useState<Map<number, Set<number>>>(new Map());
     const [pendingValidation, setPendingValidation] = useState<Set<number>>(new Set());
-    
+    const [isLoadingFile, setIsLoadingFile] = useState(false);
+    const [dataVersion, setDataVersion] = useState(0);
+
     const workerRef = useRef<Worker | null>(null);
     const pendingRequests = useRef<Map<string, { resolve: (data: any) => void; reject: (err: any) => void }>>(new Map());
     const rowCache = useRef<Map<number, string[]>>(new Map());
@@ -91,6 +97,14 @@ export function useDataStream(): UseDataStreamReturn {
                 setStage('STUDIO');
             } else if (type === 'ERROR') {
                 console.error("Worker Error:", payload);
+                const errId = payload?.id;
+                if (errId != null) {
+                    const request = pendingRequests.current.get(errId);
+                    if (request) {
+                        request.reject(new Error(payload?.error ?? String(payload)));
+                        pendingRequests.current.delete(errId);
+                    }
+                }
             }
         };
 
@@ -156,35 +170,40 @@ export function useDataStream(): UseDataStreamReturn {
 
     const loadFile = useCallback(async (file: File) => {
         if (!workerRef.current) return;
+        setIsLoadingFile(true);
         setSchema([]);
         setRowCount(0);
         setErrors(new Map());
         rowCache.current.clear();
         setPendingValidation(new Set());
 
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        console.log(`Processing ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+        try {
+            const buffer = await file.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            console.log(`Processing ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-        await new Promise<void>((resolve, reject) => {
-            const worker = workerRef.current!;
-            const handleLoad = (e: MessageEvent) => {
-                if (e.data.type === 'LOAD_COMPLETE') {
-                    const summary = e.data.payload as DatasetSummary;
-                    setSchema(summary.schema);
-                    setRowCount(summary.row_count);
-                    worker.removeEventListener('message', handleLoad);
-                    resolve();
-                } else if (e.data.type === 'ERROR') {
-                    worker.removeEventListener('message', handleLoad);
-                    reject(e.data.payload);
-                }
-            };
-            worker.addEventListener('message', handleLoad);
-            worker.postMessage({ type: 'LOAD_FILE', payload: bytes }, [bytes.buffer]);
-        });
-        
-        setStage('SCHEMA');
+            await new Promise<void>((resolve, reject) => {
+                const worker = workerRef.current!;
+                const handleLoad = (e: MessageEvent) => {
+                    if (e.data.type === 'LOAD_COMPLETE') {
+                        const summary = e.data.payload as DatasetSummary;
+                        setSchema(summary.schema);
+                        setRowCount(summary.row_count);
+                        worker.removeEventListener('message', handleLoad);
+                        resolve();
+                    } else if (e.data.type === 'ERROR') {
+                        worker.removeEventListener('message', handleLoad);
+                        reject(e.data.payload);
+                    }
+                };
+                worker.addEventListener('message', handleLoad);
+                worker.postMessage({ type: 'LOAD_FILE', payload: bytes }, [bytes.buffer]);
+            });
+
+            setStage('SCHEMA');
+        } finally {
+            setIsLoadingFile(false);
+        }
     }, []);
 
     const updateColumnType = useCallback(async (colIdx: number, newType: ColumnType) => {
@@ -292,7 +311,7 @@ export function useDataStream(): UseDataStreamReturn {
              });
 
              rowCache.current.clear();
-             
+             setDataVersion(v => v + 1);
          } catch (e) { console.error("Fix failed", e); }
     }, [schema, validateColumnsSafe]);
 
@@ -300,14 +319,16 @@ export function useDataStream(): UseDataStreamReturn {
         if (!workerRef.current) return [];
 
         const requestId = `getsuggest_${colIdx}_${Date.now()}`;
+        console.log('[useDataStream] getSuggestions colIdx=', colIdx, 'requestId=', requestId);
         try {
             const suggestions = await new Promise<SuggestionReport[]>((resolve, reject) => {
                 pendingRequests.current.set(requestId, { resolve, reject });
                 workerRef.current!.postMessage({ type: 'GET_SUGGESTIONS', colIdx, id: requestId });
             });
-            return suggestions;
+            console.log('[useDataStream] getSuggestions resolved count=', Array.isArray(suggestions) ? suggestions.length : 'not-array', suggestions);
+            return Array.isArray(suggestions) ? suggestions : [];
         } catch (e) {
-            console.error("Failed to get suggestions", e);
+            console.error("[useDataStream] getSuggestions failed", e);
             return [];
         }
     }, []);
@@ -331,6 +352,7 @@ export function useDataStream(): UseDataStreamReturn {
             });
 
             rowCache.current.clear();
+            setDataVersion(v => v + 1);
         } catch (e) {
             console.error("Apply suggestion failed", e);
         }
@@ -344,6 +366,8 @@ export function useDataStream(): UseDataStreamReturn {
         rowCount, 
         errors, 
         pendingValidation, 
+        isLoadingFile,
+        dataVersion,
         loadFile, 
         fetchRows, 
         updateColumnType, 

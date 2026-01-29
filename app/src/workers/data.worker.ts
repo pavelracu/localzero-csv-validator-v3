@@ -143,8 +143,18 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       }
       case 'GET_SUGGESTIONS': {
         const { colIdx, id } = e.data as any;
-        const suggestions = get_suggestions(colIdx);
-        self.postMessage({ type: 'GET_SUGGESTIONS_COMPLETE', id, payload: suggestions });
+        console.log('[Worker] GET_SUGGESTIONS start colIdx=', colIdx);
+        try {
+          const raw = get_suggestions(colIdx);
+          const isArr = Array.isArray(raw);
+          const suggestions = isArr ? raw : (raw != null && typeof raw === 'object' && 'length' in raw ? Array.from(raw) : []);
+          console.log('[Worker] GET_SUGGESTIONS done isArray=', isArr, 'length=', suggestions.length, 'typeof=', typeof raw);
+          self.postMessage({ type: 'GET_SUGGESTIONS_COMPLETE', id, payload: suggestions });
+        } catch (err) {
+          console.error('[Worker] GET_SUGGESTIONS threw', err);
+          self.postMessage({ type: 'ERROR', payload: { id, error: String(err) } });
+          return;
+        }
         break;
       }
       case 'APPLY_SUGGESTION': {

@@ -18,6 +18,8 @@ function App() {
     rowCount, 
     errors, 
     pendingValidation,
+    isLoadingFile,
+    dataVersion,
     loadFile, 
     fetchRows, 
     updateColumnType,
@@ -115,6 +117,7 @@ function App() {
           <Import 
             onFileSelect={loadFile}
             isReady={isReady}
+            isLoadingFile={isLoadingFile}
           />
         )}
 
@@ -136,6 +139,7 @@ function App() {
             schema={schema}
             errors={errors}
             pendingValidation={pendingValidation}
+            dataVersion={dataVersion}
             getRow={getRow}
             fetchRows={fetchRows}
             onTypeChange={updateColumnType}

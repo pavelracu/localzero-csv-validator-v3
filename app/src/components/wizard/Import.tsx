@@ -1,21 +1,23 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, ShieldCheck } from 'lucide-react';
+import { FileUp, ShieldCheck, Loader2 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 interface ImportProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect: (file: File) => Promise<void>;
   isReady: boolean;
+  /** True while the file is being loaded and parsed locally (no upload). */
+  isLoadingFile?: boolean;
 }
 
-export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady }) => {
+export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady, isLoadingFile = false }) => {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragging(true);
-  }, []);
+    if (!isLoadingFile) setIsDragging(true);
+  }, [isLoadingFile]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -48,12 +50,13 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady }) => {
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => document.getElementById('file-upload')?.click()}
+          onClick={() => !isLoadingFile && document.getElementById('file-upload')?.click()}
           className={`
-            relative cursor-pointer border-2 border-dashed
+            relative border-2 border-dashed
             transition-all duration-200 ease-in-out
             flex flex-col items-center justify-center min-h-[320px]
-            ${isDragging 
+            ${isLoadingFile ? 'cursor-wait border-primary/50 bg-primary/5' : 'cursor-pointer'}
+            ${isDragging && !isLoadingFile
                ? 'border-primary bg-primary/5 scale-[1.01]' 
                : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'
             }
@@ -61,20 +64,24 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady }) => {
           `}
         >
            <div className="bg-background p-4 rounded-full shadow-sm mb-4 ring-1 ring-border">
-              <Upload size={32} className="text-primary" />
+              {isLoadingFile ? (
+                <Loader2 size={32} className="text-primary animate-spin" />
+              ) : (
+                <FileUp size={32} className="text-primary" />
+              )}
            </div>
            <Badge variant="outline" className="mb-3 gap-1.5 border-emerald-200 bg-emerald-50/50">
              <ShieldCheck size={12} className="text-emerald-600" />
              <span className="text-emerald-700 text-xs font-medium">Offline — Data never leaves your device</span>
            </Badge>
            <h3 className="text-lg font-semibold text-foreground mb-1">
-              Upload CSV Data File
+              {isLoadingFile ? 'Loading file…' : 'Load CSV Data File'}
            </h3>
            <p className="text-sm text-muted-foreground mb-2">
-              Process up to 1GB. 100% in your browser.
+              {isLoadingFile ? 'Parsing locally. No data is uploaded.' : 'Process up to 1GB. 100% in your browser.'}
            </p>
            <p className="text-xs text-muted-foreground mb-6">
-              Drag & drop or click to browse
+              {isLoadingFile ? 'Please wait…' : 'Drag & drop or click to browse'}
            </p>
            
            <input 
@@ -85,7 +92,7 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady }) => {
              onChange={handleFileChange}
            />
            
-           <Button>Browse Files</Button>
+           <Button disabled={isLoadingFile}>{isLoadingFile ? 'Loading…' : 'Browse Files'}</Button>
         </Card>
       </div>
     </div>

@@ -11,7 +11,8 @@ interface VirtualizedTableProps {
   schema: ColumnSchema[];
   errors: Map<number, Set<number>>; 
   pendingValidation: Set<number>;
-  // We strictly use the hook's getter
+  /** Bumps when row data is invalidated (e.g. after apply fix). Triggers refetch of visible rows. */
+  dataVersion: number;
   getRow: (index: number) => string[] | undefined;
   fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>; 
   onTypeChange: (colIndex: number, newType: ColumnType) => void;
@@ -27,6 +28,7 @@ export function VirtualizedTable({
   schema, 
   errors, 
   pendingValidation, 
+  dataVersion,
   getRow, 
   fetchRows, 
   onTypeChange, 
@@ -114,7 +116,7 @@ export function VirtualizedTable({
         })
         .catch(console.error);
     });
-  }, [virtualItems, getRow, fetchRows, forceUpdate, getActualRowIndex]);
+  }, [virtualItems, getRow, fetchRows, forceUpdate, getActualRowIndex, dataVersion]);
 
   return (
     <div className="absolute inset-0 flex h-full w-full bg-background group flex-col">
@@ -251,12 +253,12 @@ export function VirtualizedTable({
             });
           }}
           onGetSuggestions={() => getSuggestions(fixingColumn)}
-          onApplySuggestion={(suggestion) => {
+          onApplySuggestion={(suggestion) =>
             applySuggestion(fixingColumn, suggestion).then(() => {
-              // Force re-render after suggestion applied
+              setFixingColumn(null);
               forceUpdate();
-            });
-          }}
+            })
+          }
           onClose={() => setFixingColumn(null)}
           open={fixingColumn !== null}
         />

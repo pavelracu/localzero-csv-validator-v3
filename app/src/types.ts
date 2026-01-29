@@ -11,9 +11,13 @@ export interface DatasetSummary {
     schema: ColumnSchema[];
 }
 
-export type Suggestion = 
+export type Suggestion =
     | 'TrimWhitespace'
-    | { RemoveChars: { chars: string } };
+    | { RemoveChars: { chars: string } }
+    | { DigitsOnly: null }
+    | { PhoneStripToTenDigits: null }
+    | { NormalizeDateToIso: null }
+    | { NormalizeBooleanCase: null };
 
 export interface SuggestionReport {
     suggestion: Suggestion;
