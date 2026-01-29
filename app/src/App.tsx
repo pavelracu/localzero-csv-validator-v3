@@ -20,7 +20,9 @@ function App() {
     fetchRows, 
     updateColumnType,
     runBatchValidation,
-    applyFix,
+    applyCorrection,
+    getSuggestions,
+    applySuggestion,
     getRow,
     confirmSchema
   } = useDataStream();
@@ -138,7 +140,9 @@ function App() {
                     pendingValidation={pendingValidation}
                     fetchRows={fetchRows}
                     onTypeChange={updateColumnType}
-                    onFix={applyFix}
+                    onCorrection={applyCorrection}
+                    onGetSuggestions={getSuggestions}
+                    onApplySuggestion={applySuggestion}
                     getRow={getRow}
                  />
               </div>

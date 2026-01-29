@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ColumnType } from '../../types';
+import { ColumnType, Suggestion, SuggestionReport } from '../../types';
 import { FixPanel } from '../mechanic/FixPanel';
 import { AlertTriangle, Clock } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,9 @@ interface ColumnHeaderProps {
     isPending: boolean;
     errorCount: number;
     onTypeChange: (newType: ColumnType) => void;
-    onFix: (strategy: string) => void;
+    onCorrection: (strategy: string) => void;
+    onGetSuggestions: () => Promise<SuggestionReport[]>;
+    onApplySuggestion: (suggestion: Suggestion) => void;
 }
 
 const TYPES: ColumnType[] = ['Text', 'Integer', 'Float', 'Boolean', 'Email', 'PhoneUS', 'Date'];
@@ -22,12 +24,14 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
     isPending, 
     errorCount, 
     onTypeChange, 
-    onFix 
+    onCorrection,
+    onGetSuggestions,
+    onApplySuggestion,
 }) => {
     const [showFixPanel, setShowFixPanel] = useState(false);
 
     return (
-        <div className={`flex flex-col items-start space-y-1 p-2 border-b h-full relative transition-colors ${
+        <div className={`flex flex-col items-start space-y-1 p-2 border-b relative transition-colors ${
             isPending 
                 ? 'bg-amber-50 border-t-4 border-t-amber-400 border-b-amber-200' 
                 : errorCount > 0 
@@ -72,10 +76,7 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
                 }`}>
                     <SelectValue />
                 </SelectTrigger>
-                {/* Fix: Use position="popper" and ensure z-index is high. 
-                   The standard SelectContent uses a Portal by default, which is good.
-                */}
-                <SelectContent position="popper" className="z-50 max-h-[200px]">
+                <SelectContent className="z-50 max-h-[200px]">
                     {TYPES.map(t => (
                         <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
                     ))}
@@ -85,8 +86,13 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
             <FixPanel 
                 column={{ name, type }}
                 errorCount={errorCount}
-                onFix={(strategy) => {
-                    onFix(strategy);
+                onCorrection={(strategy) => {
+                    onCorrection(strategy);
+                    setShowFixPanel(false);
+                }}
+                onGetSuggestions={onGetSuggestions}
+                onApplySuggestion={(suggestion) => {
+                    onApplySuggestion(suggestion);
                     setShowFixPanel(false);
                 }}
                 onClose={() => setShowFixPanel(false)}

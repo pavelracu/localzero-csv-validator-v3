@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ColumnSchema, ColumnType, DatasetSummary } from '../types';
+import { ColumnSchema, ColumnType, DatasetSummary, Suggestion, SuggestionReport } from '../types';
 import DataWorker from '../workers/data.worker?worker';
 
 export type AppStage = 'IMPORT' | 'ARCHITECT' | 'PROCESSING' | 'STUDIO';
@@ -17,7 +17,9 @@ export interface UseDataStreamReturn {
     updateColumnType: (colIdx: number, newType: ColumnType) => Promise<void>;
     getRow: (index: number) => string[] | undefined;
     runBatchValidation: () => Promise<void>;
-    applyFix: (colIdx: number, strategy: string) => Promise<void>;
+    applyCorrection: (colIdx: number, strategy: string) => Promise<void>;
+    getSuggestions: (colIdx: number) => Promise<SuggestionReport[]>;
+    applySuggestion: (colIdx: number, suggestion: Suggestion) => Promise<void>;
     confirmSchema: () => Promise<void>;
 }
 
@@ -45,7 +47,13 @@ export function useDataStream(): UseDataStreamReturn {
 
             if (type === 'INIT_COMPLETE') {
                 setIsReady(true);
-            } else if (type === 'GET_ROWS_COMPLETE' || type === 'VALIDATE_COLUMN_COMPLETE' || type === 'CORRECTION_COMPLETE') {
+            } else if (
+                type === 'GET_ROWS_COMPLETE' || 
+                type === 'VALIDATE_COLUMN_COMPLETE' || 
+                type === 'CORRECTION_COMPLETE' ||
+                type === 'GET_SUGGESTIONS_COMPLETE' ||
+                type === 'SUGGESTION_COMPLETE'
+            ) {
                 const request = pendingRequests.current.get(id);
                 if (request) {
                     request.resolve(payload);
@@ -263,7 +271,7 @@ export function useDataStream(): UseDataStreamReturn {
         }
     }, [schema]);
 
-    const applyFix = useCallback(async (colIdx: number, strategy: string) => {
+    const applyCorrection = useCallback(async (colIdx: number, strategy: string) => {
          if (!workerRef.current) return;
 
          const requestId = `fix_${colIdx}_${Date.now()}`;
@@ -287,6 +295,46 @@ export function useDataStream(): UseDataStreamReturn {
          } catch (e) { console.error("Fix failed", e); }
     }, [schema, validateColumnsSafe]);
 
+    const getSuggestions = useCallback(async (colIdx: number): Promise<SuggestionReport[]> => {
+        if (!workerRef.current) return [];
+
+        const requestId = `getsuggest_${colIdx}_${Date.now()}`;
+        try {
+            const suggestions = await new Promise<SuggestionReport[]>((resolve, reject) => {
+                pendingRequests.current.set(requestId, { resolve, reject });
+                workerRef.current!.postMessage({ type: 'GET_SUGGESTIONS', colIdx, id: requestId });
+            });
+            return suggestions;
+        } catch (e) {
+            console.error("Failed to get suggestions", e);
+            return [];
+        }
+    }, []);
+
+    const applySuggestion = useCallback(async (colIdx: number, suggestion: Suggestion) => {
+        if (!workerRef.current) return;
+
+        const requestId = `applysuggest_${colIdx}_${Date.now()}`;
+        try {
+            await new Promise<number>((resolve, reject) => {
+                pendingRequests.current.set(requestId, { resolve, reject });
+                workerRef.current!.postMessage({ type: 'APPLY_SUGGESTION', colIdx, suggestion, id: requestId });
+            });
+            
+            await validateColumnsSafe([colIdx]);
+            
+            setPendingValidation(prev => {
+                const next = new Set(prev);
+                next.delete(colIdx);
+                return next;
+            });
+
+            rowCache.current.clear();
+        } catch (e) {
+            console.error("Apply suggestion failed", e);
+        }
+    }, [schema, validateColumnsSafe]);
+
     return { 
         isReady, 
         stage, 
@@ -300,7 +348,9 @@ export function useDataStream(): UseDataStreamReturn {
         updateColumnType, 
         getRow, 
         runBatchValidation, 
-        applyFix, 
+        applyCorrection,
+        getSuggestions,
+        applySuggestion,
         confirmSchema 
     };
 }

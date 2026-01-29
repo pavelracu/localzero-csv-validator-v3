@@ -10,3 +10,15 @@ export interface DatasetSummary {
     file_size_mb: number;
     schema: ColumnSchema[];
 }
+
+export type Suggestion = 
+    | 'TrimWhitespace'
+    | { RemoveChars: { chars: string } };
+
+export interface SuggestionReport {
+    suggestion: Suggestion;
+    description: string;
+    affected_rows_count: number;
+    example_before: string;
+    example_after: string;
+}

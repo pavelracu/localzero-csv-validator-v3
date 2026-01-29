@@ -6,7 +6,7 @@ import {
   createColumnHelper,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ColumnSchema, ColumnType } from '../../types';
+import { ColumnSchema, ColumnType, Suggestion, SuggestionReport } from '../../types';
 import { ColumnHeader } from './ColumnHeader';
 
 interface VirtualizedTableProps {
@@ -16,7 +16,9 @@ interface VirtualizedTableProps {
   pendingValidation: Set<number>;
   fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>;
   onTypeChange: (colIndex: number, newType: ColumnType) => void;
-  onFix: (colIndex: number, strategy: string) => void;
+  onCorrection: (colIndex: number, strategy: string) => void;
+  onGetSuggestions: (colIndex: number) => Promise<SuggestionReport[]>;
+  onApplySuggestion: (colIndex: number, suggestion: Suggestion) => void;
   getRow: (index: number) => string[] | undefined;
 }
 
@@ -29,7 +31,9 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
   pendingValidation,
   fetchRows,
   onTypeChange,
-  onFix,
+  onCorrection,
+  onGetSuggestions,
+  onApplySuggestion,
   getRow,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -103,13 +107,15 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
             isPending={pendingValidation.has(index)}
             errorCount={errors.get(index)?.size || 0}
             onTypeChange={(newType) => onTypeChange(index, newType)}
-            onFix={(strategy) => onFix(index, strategy)}
+            onCorrection={(strategy) => onCorrection(index, strategy)}
+            onGetSuggestions={() => onGetSuggestions(index)}
+            onApplySuggestion={(suggestion) => onApplySuggestion(index, suggestion)}
           />
         ),
         cell: (info) => info.getValue(),
       })
     );
-  }, [schema, onTypeChange, pendingValidation, errors, onFix]);
+  }, [schema, onTypeChange, pendingValidation, errors, onCorrection, onGetSuggestions, onApplySuggestion]);
 
   const table = useReactTable({
     data: [],
@@ -124,16 +130,15 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
     >
         <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
             <table className="w-full text-left border-collapse" style={{ tableLayout: 'fixed' }}>
-                <thead className="bg-white sticky top-0 z-20 shadow-sm" style={{ transform: `translateY(${virtualItems[0]?.start ?? 0}px)` }}>
+                <thead className="bg-white sticky top-0 z-20 shadow-sm">
                     {table.getHeaderGroups().map(headerGroup => (
                         <tr key={headerGroup.id} className="flex w-full">
                             {headerGroup.headers.map(header => (
-                                <th 
-                                    key={header.id} 
-                                    className="h-10 px-4 text-left align-middle font-medium text-muted-foreground bg-white border-b border-border flex-1 min-w-[150px]"
-                                    style={{ width: header.getSize() }}
-                                >
-                                    {header.isPlaceholder
+                                                                <th
+                                                                    key={header.id}
+                                                                    className="px-4 text-left align-middle font-medium text-muted-foreground bg-white border-b border-border flex-1 min-w-[150px]"
+                                                                    style={{ width: header.getSize() }}
+                                                                >                                    {header.isPlaceholder
                                         ? null
                                         : flexRender(header.column.columnDef.header, header.getContext())}
                                 </th>

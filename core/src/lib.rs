@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 
 mod engine;
-use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}};
+use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}, mechanic};
 
 // GLOBAL STATE (The "Database" in Memory)
 lazy_static! {
@@ -95,6 +95,56 @@ pub fn validate_chunk(start_row: usize, limit: usize) -> Result<JsValue, JsValue
         let error_flat_list = df.validate_range(start_row, limit);
         
         Ok(serde_wasm_bindgen::to_value(&error_flat_list)?)
+    } else {
+        Err(JsValue::from_str("No dataset loaded"))
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_suggestions(col_idx: usize) -> Result<JsValue, JsValue> {
+    let store = DATASET.lock().unwrap();
+    if let Some(df) = &*store {
+        let reports = mechanic::analyze_column(df, col_idx);
+        Ok(serde_wasm_bindgen::to_value(&reports)?)
+    } else {
+        Err(JsValue::from_str("No dataset loaded"))
+    }
+}
+
+#[wasm_bindgen]
+pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usize, JsValue> {
+    let suggestion: mechanic::Suggestion = serde_wasm_bindgen::from_value(suggestion_json)?;
+    let mut store = DATASET.lock().unwrap();
+
+    if let Some(df) = store.as_mut() {
+        let mut fixed_count = 0;
+        let col_type = df.columns[col_idx].detected_type;
+
+        // This is inefficient as it iterates all rows.
+        // A better approach would be to iterate only the invalid rows, which we'd need to find first.
+        for row_idx in 0..df.rows {
+            if let Some(old_val) = df.get_cell(row_idx, col_idx) {
+                if !col_type.is_valid(&old_val) {
+                     let new_val = match &suggestion {
+                        mechanic::Suggestion::TrimWhitespace => {
+                            old_val.trim().to_string()
+                        },
+                        mechanic::Suggestion::RemoveChars { chars } => {
+                            old_val.replace(chars, "")
+                        }
+                    };
+
+                    if new_val != old_val && col_type.is_valid(&new_val) {
+                        df.patches
+                            .entry(row_idx)
+                            .or_insert_with(HashMap::new)
+                            .insert(col_idx, new_val);
+                        fixed_count += 1;
+                    }
+                }
+            }
+        }
+        Ok(fixed_count)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
     }

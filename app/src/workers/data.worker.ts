@@ -1,4 +1,4 @@
-import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction } from '../wasm/localzero_core';
+import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion } from '../wasm/localzero_core';
 
 type WorkerMessage = 
   | { type: 'INIT' }
@@ -7,7 +7,9 @@ type WorkerMessage =
   | { type: 'VALIDATE_COLUMN'; colIdx: number; newType: string; id: string }
   | { type: 'VALIDATE_CHUNK'; start: number; limit: number; id: string }
   | { type: 'START_VALIDATION' }
-  | { type: 'APPLY_CORRECTION'; colIdx: number; strategy: string; id: string };
+  | { type: 'APPLY_CORRECTION'; colIdx: number; strategy: string; id: string }
+  | { type: 'GET_SUGGESTIONS'; colIdx: number; id: string }
+  | { type: 'APPLY_SUGGESTION'; colIdx: number; suggestion: any; id: string };
 
 let isWasmReady = false;
 let totalRows = 0;
@@ -132,6 +134,18 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const { colIdx, strategy, id } = e.data as any;
         const count = apply_correction(colIdx, strategy);
         self.postMessage({ type: 'CORRECTION_COMPLETE', id, payload: count });
+        break;
+      }
+      case 'GET_SUGGESTIONS': {
+        const { colIdx, id } = e.data as any;
+        const suggestions = get_suggestions(colIdx);
+        self.postMessage({ type: 'GET_SUGGESTIONS_COMPLETE', id, payload: suggestions });
+        break;
+      }
+      case 'APPLY_SUGGESTION': {
+        const { colIdx, suggestion, id } = e.data as any;
+        const count = apply_suggestion(colIdx, suggestion);
+        self.postMessage({ type: 'SUGGESTION_COMPLETE', id, payload: count });
         break;
       }
     }
