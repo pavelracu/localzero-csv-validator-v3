@@ -3,10 +3,11 @@ import { useDataStream } from './hooks/useDataStream';
 import { VirtualizedTable } from './components/grid/VirtualizedTable';
 import { ImportHub } from './components/wizard/ImportHub';
 import { SchemaArchitect } from './components/wizard/SchemaArchitect';
-import { FileType, CheckCircle, AlertTriangle, Play, Loader2 } from 'lucide-react';
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Loader2 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
+import { AppHeader } from './components/layout/AppHeader';
+import { StatusBar } from './components/layout/StatusBar';
+import { FixSidebar } from './components/mechanic/FixSidebar';
 
 function App() {
   const { 
@@ -29,6 +30,7 @@ function App() {
 
   const [isValidating, setIsValidating] = useState(false);
   const [architectSamples, setArchitectSamples] = useState<Record<number, string[]>>({});
+  const [fixingColumn, setFixingColumn] = useState<number | null>(null);
 
   useEffect(() => {
     if (stage === 'ARCHITECT' && rowCount > 0) {
@@ -51,88 +53,65 @@ function App() {
      alert(`Preset ${presetId} selected (Functionality mocked)`);
      console.log("Preset selected:", presetId);
   };
+  
+  const handleRunValidation = async () => {
+    setIsValidating(true);
+    await runBatchValidation();
+    setIsValidating(false);
+  };
+
+  const showStatusBar = stage === 'ARCHITECT' || stage === 'STUDIO' || stage === 'PROCESSING';
+
+  const selectedColumnForFix = fixingColumn !== null && schema[fixingColumn]
+  ? { 
+      index: fixingColumn, 
+      schema: schema[fixingColumn],
+      errorCount: errors.get(fixingColumn)?.size || 0,
+    } 
+  : null;
+
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-start p-8 font-sans">
-      <div className="w-full max-w-[1600px] space-y-6">
-        
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">LocalZero Schema Engine</h1>
-            <Badge variant={isReady ? "secondary" : "warning"} className="tracking-wide">
-                {stage === 'IMPORT' ? 'READY' : stage}
-            </Badge>
-          </div>
-          
-          {stage === 'STUDIO' && (
-             <div className="flex items-center gap-4">
-                {pendingValidation.size > 0 && (
-                    <Button
-                        onClick={async () => {
-                            setIsValidating(true);
-                            await runBatchValidation();
-                            setIsValidating(false);
-                        }}
-                        disabled={isValidating}
-                        className="gap-2 bg-amber-500 hover:bg-amber-600 text-white border-none"
-                    >
-                        {isValidating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-                        Validate {pendingValidation.size} Changes
-                    </Button>
-                )}
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-background font-sans">
+      <AppHeader 
+        isReady={isReady}
+        stage={stage}
+        pendingValidationCount={pendingValidation.size}
+        isValidating={isValidating}
+        onRunValidation={handleRunValidation}
+      />
+      
+      <main className="flex-1 flex flex-col overflow-auto">
+         {stage === 'IMPORT' && (
+             <ImportHub 
+                onFileSelect={handleFileSelect} 
+                onPresetSelect={handlePresetSelect} 
+                isReady={isReady} 
+             />
+         )}
 
-                <div className="flex items-center gap-6 text-sm text-muted-foreground bg-background px-4 py-2 rounded-lg border border-border shadow-sm">
-                    <div className="flex items-center gap-2">
-                    <FileType size={16} />
-                    <span>{rowCount.toLocaleString()} rows</span>
-                    </div>
-                    <div className="h-4 w-px bg-border"></div>
-                    <div className="flex items-center gap-2">
-                    {errors.size > 0 ? (
-                        <>
-                            <AlertTriangle size={16} className="text-amber-500" />
-                            <span className="font-medium text-amber-700">{errors.size} columns with errors</span>
-                        </>
-                    ) : (
-                        <>
-                            <CheckCircle size={16} className="text-emerald-500" />
-                            <span className="font-medium text-emerald-700">All Valid</span>
-                        </>
-                    )}
-                    </div>
-                </div>
+         {stage === 'ARCHITECT' && (
+             <SchemaArchitect 
+                schema={schema} 
+                sampleRows={architectSamples}
+                onTypeChange={updateColumnType}
+                onConfirm={confirmSchema}
+             />
+         )}
+
+         {stage === 'PROCESSING' && (
+             <div className="flex-1 flex items-center justify-center">
+                <Card className="flex flex-col items-center justify-center p-8">
+                     <Loader2 size={48} className="text-primary animate-spin mb-4" />
+                     <h3 className="text-xl font-semibold text-foreground">Validating Data...</h3>
+                     <p className="text-muted-foreground">Processing {rowCount.toLocaleString()} rows against your schema</p>
+                </Card>
              </div>
-          )}
-        </div>
+         )}
 
-        <main className="w-full">
-           {stage === 'IMPORT' && (
-               <ImportHub 
-                  onFileSelect={handleFileSelect} 
-                  onPresetSelect={handlePresetSelect} 
-                  isReady={isReady} 
-               />
-           )}
-
-           {stage === 'ARCHITECT' && (
-               <SchemaArchitect 
-                  schema={schema} 
-                  sampleRows={architectSamples}
-                  onTypeChange={updateColumnType}
-                  onConfirm={confirmSchema}
-               />
-           )}
-
-           {stage === 'PROCESSING' && (
-               <Card className="flex flex-col items-center justify-center min-h-[400px]">
-                   <Loader2 size={48} className="text-primary animate-spin mb-4" />
-                   <h3 className="text-xl font-semibold text-foreground">Validating Data...</h3>
-                   <p className="text-muted-foreground">Processing {rowCount.toLocaleString()} rows against your schema</p>
-               </Card>
-           )}
-
-           {stage === 'STUDIO' && (
-              <div className="bg-background rounded-xl shadow-sm border border-border overflow-hidden">
+         {stage === 'STUDIO' && (
+            <div className="flex-1 flex min-h-0">
+               <div className="flex-1 relative">
                  <VirtualizedTable 
                     rowCount={rowCount}
                     schema={schema}
@@ -140,16 +119,26 @@ function App() {
                     pendingValidation={pendingValidation}
                     fetchRows={fetchRows}
                     onTypeChange={updateColumnType}
-                    onCorrection={applyCorrection}
-                    onGetSuggestions={getSuggestions}
-                    onApplySuggestion={applySuggestion}
+                    onSelectFix={setFixingColumn}
                     getRow={getRow}
                  />
-              </div>
-           )}
-        </main>
+               </div>
+                {fixingColumn !== null && (
+                    <div className="w-[400px] border-l border-border flex-shrink-0">
+                        <FixSidebar 
+                            selectedColumn={selectedColumnForFix}
+                            onCorrection={applyCorrection}
+                            onGetSuggestions={getSuggestions}
+                            onApplySuggestion={applySuggestion}
+                            onClose={() => setFixingColumn(null)}
+                        />
+                   </div>
+                )}
+            </div>
+         )}
+      </main>
 
-      </div>
+      {showStatusBar && <StatusBar rowCount={rowCount} errorCount={errors.size} />}
     </div>
   );
 }

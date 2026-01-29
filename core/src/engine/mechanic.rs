@@ -7,6 +7,7 @@ use super::schema::ColumnType;
 pub enum Suggestion {
     TrimWhitespace,
     RemoveChars { chars: String },
+    DigitsOnly,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -128,6 +129,87 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
                         example_after,
                     });
                 }
+            }
+        }
+    }
+
+    // 4. Email: remove spaces
+    if col_type == ColumnType::Email {
+        let char_to_remove = ' ';
+        let mut example_before = String::new();
+        let mut example_after = String::new();
+        let mut affected_unique_values = 0;
+        for val in &invalid_values {
+            if val.contains(char_to_remove) {
+                let after = val.replace(char_to_remove, "");
+                if col_type.is_valid(&after) {
+                    if example_before.is_empty() {
+                        example_before = val.clone();
+                        example_after = after;
+                    }
+                    affected_unique_values += 1;
+                }
+            }
+        }
+        if affected_unique_values > 0 {
+            let mut total_affected = 0;
+            for row_idx in 0..df.rows {
+                 if let Some(val) = df.get_cell(row_idx, col_idx) {
+                     if val.contains(char_to_remove) {
+                         let after = val.replace(char_to_remove, "");
+                         if col_type.is_valid(&after) {
+                             total_affected += 1;
+                         }
+                     }
+                 }
+            }
+            if total_affected > 0 {
+                suggestions.push(SuggestionReport {
+                    suggestion: Suggestion::RemoveChars { chars: char_to_remove.to_string() },
+                    description: format!("Remove spaces from {} emails", total_affected),
+                    affected_rows_count: total_affected,
+                    example_before,
+                    example_after,
+                });
+            }
+        }
+    }
+
+    // 5. Phone: keep only digits
+    if col_type == ColumnType::PhoneUS {
+        let mut example_before = String::new();
+        let mut example_after = String::new();
+        let mut affected_unique_values = 0;
+
+        for val in &invalid_values {
+            let after: String = val.chars().filter(|c| c.is_ascii_digit()).collect();
+            if after != *val && col_type.is_valid(&after) {
+                if example_before.is_empty() {
+                    example_before = val.clone();
+                    example_after = after;
+                }
+                affected_unique_values += 1;
+            }
+        }
+
+        if affected_unique_values > 0 {
+            let mut total_affected = 0;
+            for row_idx in 0..df.rows {
+                if let Some(val) = df.get_cell(row_idx, col_idx) {
+                    let after: String = val.chars().filter(|c| c.is_ascii_digit()).collect();
+                    if after != *val && col_type.is_valid(&after) {
+                        total_affected += 1;
+                    }
+                }
+            }
+             if total_affected > 0 {
+                suggestions.push(SuggestionReport {
+                    suggestion: Suggestion::DigitsOnly,
+                    description: format!("Remove formatting from {} phone numbers", total_affected),
+                    affected_rows_count: total_affected,
+                    example_before,
+                    example_after,
+                });
             }
         }
     }

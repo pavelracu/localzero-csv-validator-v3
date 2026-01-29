@@ -1,8 +1,9 @@
-import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion } from '../wasm/localzero_core';
+import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion, update_schema } from '../wasm/localzero_core';
 
 type WorkerMessage = 
   | { type: 'INIT' }
   | { type: 'LOAD_FILE'; payload: Uint8Array }
+  | { type: 'UPDATE_SCHEMA'; payload: any }
   | { type: 'GET_ROWS'; start: number; limit: number; id: string }
   | { type: 'VALIDATE_COLUMN'; colIdx: number; newType: string; id: string }
   | { type: 'VALIDATE_CHUNK'; start: number; limit: number; id: string }
@@ -86,6 +87,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const summary = load_dataset(bytes); 
         totalRows = summary.row_count;
         self.postMessage({ type: 'LOAD_COMPLETE', payload: summary });
+        break;
+      }
+      case 'UPDATE_SCHEMA': {
+        update_schema(e.data.payload);
         break;
       }
       case 'START_VALIDATION': {

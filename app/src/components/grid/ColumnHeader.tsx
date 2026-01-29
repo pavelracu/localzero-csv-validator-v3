@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { ColumnType, Suggestion, SuggestionReport } from '../../types';
-import { FixPanel } from '../mechanic/FixPanel';
+import React from 'react';
+import { ColumnType } from '../../types';
 import { AlertTriangle, Clock } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,9 +10,7 @@ interface ColumnHeaderProps {
     isPending: boolean;
     errorCount: number;
     onTypeChange: (newType: ColumnType) => void;
-    onCorrection: (strategy: string) => void;
-    onGetSuggestions: () => Promise<SuggestionReport[]>;
-    onApplySuggestion: (suggestion: Suggestion) => void;
+    onSelectFix: () => void;
 }
 
 const TYPES: ColumnType[] = ['Text', 'Integer', 'Float', 'Boolean', 'Email', 'PhoneUS', 'Date'];
@@ -24,14 +21,10 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
     isPending, 
     errorCount, 
     onTypeChange, 
-    onCorrection,
-    onGetSuggestions,
-    onApplySuggestion,
+    onSelectFix,
 }) => {
-    const [showFixPanel, setShowFixPanel] = useState(false);
-
     return (
-        <div className={`flex flex-col items-start space-y-1 p-2 border-b relative transition-colors ${
+        <div className={`flex flex-col items-start space-y-1 p-1 border-b relative transition-colors ${
             isPending 
                 ? 'bg-amber-50 border-t-4 border-t-amber-400 border-b-amber-200' 
                 : errorCount > 0 
@@ -54,7 +47,7 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
                         <Badge 
                             variant="destructive" 
                             className="cursor-pointer hover:opacity-80 px-1.5 py-0.5 text-[10px] flex items-center gap-1 h-5"
-                            onClick={() => setShowFixPanel(true)}
+                            onClick={onSelectFix}
                         >
                             <AlertTriangle size={10} />
                             {errorCount}
@@ -67,7 +60,7 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
                 value={type}
                 onValueChange={(val) => onTypeChange(val as ColumnType)}
             >
-                <SelectTrigger className={`h-7 text-xs px-2 ${
+                <SelectTrigger className={`h-6 text-xs px-1 ${
                     isPending 
                         ? 'border-amber-300 ring-amber-100' 
                         : errorCount > 0 
@@ -82,22 +75,6 @@ export const ColumnHeader: React.FC<ColumnHeaderProps> = ({
                     ))}
                 </SelectContent>
             </Select>
-
-            <FixPanel 
-                column={{ name, type }}
-                errorCount={errorCount}
-                onCorrection={(strategy) => {
-                    onCorrection(strategy);
-                    setShowFixPanel(false);
-                }}
-                onGetSuggestions={onGetSuggestions}
-                onApplySuggestion={(suggestion) => {
-                    onApplySuggestion(suggestion);
-                    setShowFixPanel(false);
-                }}
-                onClose={() => setShowFixPanel(false)}
-                open={showFixPanel}
-            />
         </div>
     );
 };

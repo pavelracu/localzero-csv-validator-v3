@@ -16,9 +16,7 @@ interface VirtualizedTableProps {
   pendingValidation: Set<number>;
   fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>;
   onTypeChange: (colIndex: number, newType: ColumnType) => void;
-  onCorrection: (colIndex: number, strategy: string) => void;
-  onGetSuggestions: (colIndex: number) => Promise<SuggestionReport[]>;
-  onApplySuggestion: (colIndex: number, suggestion: Suggestion) => void;
+  onSelectFix: (colIndex: number) => void;
   getRow: (index: number) => string[] | undefined;
 }
 
@@ -31,9 +29,7 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
   pendingValidation,
   fetchRows,
   onTypeChange,
-  onCorrection,
-  onGetSuggestions,
-  onApplySuggestion,
+  onSelectFix,
   getRow,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -107,15 +103,13 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
             isPending={pendingValidation.has(index)}
             errorCount={errors.get(index)?.size || 0}
             onTypeChange={(newType) => onTypeChange(index, newType)}
-            onCorrection={(strategy) => onCorrection(index, strategy)}
-            onGetSuggestions={() => onGetSuggestions(index)}
-            onApplySuggestion={(suggestion) => onApplySuggestion(index, suggestion)}
+            onSelectFix={() => onSelectFix(index)}
           />
         ),
         cell: (info) => info.getValue(),
       })
     );
-  }, [schema, onTypeChange, pendingValidation, errors, onCorrection, onGetSuggestions, onApplySuggestion]);
+  }, [schema, onTypeChange, pendingValidation, errors, onSelectFix]);
 
   const table = useReactTable({
     data: [],
@@ -126,17 +120,17 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
   return (
     <div 
         ref={parentRef} 
-        className="overflow-auto border border-gray-200 rounded-lg h-[600px] w-full relative bg-white"
+        className="overflow-auto h-full w-full relative"
     >
         <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
             <table className="w-full text-left border-collapse" style={{ tableLayout: 'fixed' }}>
-                <thead className="bg-white sticky top-0 z-20 shadow-sm">
+                <thead className="bg-background sticky top-0 z-20 shadow-sm">
                     {table.getHeaderGroups().map(headerGroup => (
                         <tr key={headerGroup.id} className="flex w-full">
                             {headerGroup.headers.map(header => (
                                                                 <th
                                                                     key={header.id}
-                                                                    className="px-4 text-left align-middle font-medium text-muted-foreground bg-white border-b border-border flex-1 min-w-[150px]"
+                                                                    className="px-4 text-left align-middle font-medium text-muted-foreground bg-background border-b border-border flex-1 min-w-[150px]"
                                                                     style={{ width: header.getSize() }}
                                                                 >                                    {header.isPlaceholder
                                         ? null
@@ -177,7 +171,7 @@ export const VirtualizedTable: React.FC<VirtualizedTableProps> = ({
                                     return (
                                         <td
                                             key={column.id}
-                                            className={`relative p-2 text-sm border-r border-border truncate flex-1 min-w-[150px] font-mono ${
+                                            className={`relative p-1 text-sm border-r border-border truncate flex-1 min-w-[150px] font-mono ${
                                                 isError ? 'text-foreground bg-red-50/30' : 'text-muted-foreground'
                                             }`}
                                             title={!isLoading && isError ? `Error: ${cellValue}` : (cellValue || "")}

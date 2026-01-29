@@ -267,6 +267,7 @@ export function useDataStream(): UseDataStreamReturn {
         setErrors(new Map());
         
         if (workerRef.current) {
+            workerRef.current.postMessage({ type: 'UPDATE_SCHEMA', payload: schema });
             workerRef.current.postMessage({ type: 'START_VALIDATION' });
         }
     }, [schema]);

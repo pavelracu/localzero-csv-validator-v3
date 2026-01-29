@@ -131,6 +131,9 @@ pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usiz
                         },
                         mechanic::Suggestion::RemoveChars { chars } => {
                             old_val.replace(chars, "")
+                        },
+                        mechanic::Suggestion::DigitsOnly => {
+                            old_val.chars().filter(|c| c.is_ascii_digit()).collect()
                         }
                     };
 
@@ -254,4 +257,20 @@ pub fn validate_column(col_idx: usize, type_name: &str) -> Result<Vec<usize>, Js
     } else {
         Err(JsValue::from_str("No dataset loaded"))
     }
+}
+
+#[wasm_bindgen]
+pub fn update_schema(schema_js: JsValue) -> Result<(), JsValue> {
+    let schema: Vec<ColumnSchema> = serde_wasm_bindgen::from_value(schema_js)
+        .map_err(|e| JsValue::from_str(&format!("Failed to deserialize schema: {}", e)))?;
+    
+    let mut store = DATASET.lock().unwrap();
+    if let Some(df) = store.as_mut() {
+        if df.columns.len() == schema.len() {
+            df.columns = schema;
+        } else {
+            return Err(JsValue::from_str("Schema length mismatch"));
+        }
+    }
+    Ok(())
 }
