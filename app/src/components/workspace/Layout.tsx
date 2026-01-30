@@ -3,7 +3,6 @@ import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { AppHeader } from '../layout/AppHeader';
 import { SystemVitalsHeader } from './SystemVitalsHeader';
 import { Sidebar } from './Sidebar';
-import { StatusBar } from '../layout/StatusBar';
 import type { AppStage } from '../../hooks/useDataStream';
 import type { ColumnSchema } from '../../types';
 import { cn } from '@/lib/utils';
@@ -12,7 +11,7 @@ export interface LayoutProps {
   isReady: boolean;
   stage: AppStage;
   rowCount: number;
-  errorCount: number;
+  errorCount?: number;
   /** Schema for Audit Log column labels (optional). */
   schema?: ColumnSchema[];
   /** True while workspace metadata is being persisted to IndexedDB after file load. */
@@ -32,7 +31,6 @@ export function Layout({
   isReady,
   stage,
   rowCount,
-  errorCount,
   schema,
   isSavingWorkspace = false,
   isPersisting = false,
@@ -44,7 +42,6 @@ export function Layout({
   children,
 }: LayoutProps) {
   const { hasActiveFile } = useWorkspace();
-  const showStatusBar = (stage === 'INGESTION' && rowCount > 0) || stage === 'STUDIO';
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-background">

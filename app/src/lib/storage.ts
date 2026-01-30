@@ -28,5 +28,10 @@ export const SchemaStorage = {
         } catch {
             return [];
         }
-    }
+    },
+
+    remove: (id: string) => {
+        const presets = SchemaStorage.list().filter((p) => p.id !== id);
+        localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+    },
 };

@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ColumnSchema, ColumnType, SchemaPreset } from '../../types';
-import { Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, FileType, Save, FolderOpen, Search } from 'lucide-react';
+import { ColumnSchema, ColumnType } from '../../types';
+import { Calendar, Hash, ToggleLeft, AlignLeft, Mail, Phone, Check, Save, Search, X } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { suggestTypeFromColumnName } from '@/lib/columnNameHints';
 
 interface MappingProps {
     schema: ColumnSchema[];
@@ -14,10 +15,11 @@ interface MappingProps {
     onTypeChange: (colIndex: number, newType: ColumnType) => void;
     onConfirm: () => void;
     onSavePreset: (name: string) => void;
-    onLoadPreset: (preset: SchemaPreset) => void;
-    presets: SchemaPreset[];
-    /** Optional column name → type hints from selected schema; applied once when schema is set. */
+    /** Mapping from selected schema (predefined or saved) on screen 1; applied once when schema is set. */
     schemaHints?: Record<string, ColumnType>;
+    /** File name and row count for header context. */
+    fileName?: string;
+    rowCount: number;
 }
 
 const TYPE_ICONS: Record<ColumnType, React.ReactNode> = {
@@ -38,14 +40,15 @@ export const Mapping: React.FC<MappingProps> = ({
     onTypeChange,
     onConfirm,
     onSavePreset,
-    onLoadPreset,
-    presets,
     schemaHints,
+    fileName,
+    rowCount,
 }) => {
     const [saveDialogOpen, setSaveDialogOpen] = useState(false);
     const [saveSchemaName, setSaveSchemaName] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const hasAppliedHints = useRef(false);
+    const hasAppliedNameHints = useRef(false);
 
     const handleOpenSaveDialog = () => {
         setSaveSchemaName('');
@@ -82,6 +85,20 @@ export const Mapping: React.FC<MappingProps> = ({
         });
     }, [schema, schemaHints, onTypeChange]);
 
+    // Apply name-based type hints for columns still Text (skip if schema hint exists for that column)
+    useEffect(() => {
+        if (hasAppliedNameHints.current || schema.length === 0) return;
+        hasAppliedNameHints.current = true;
+        schema.forEach((col, idx) => {
+            if (col.detected_type !== 'Text') return;
+            if (schemaHints?.[col.name]) return;
+            const suggested = suggestTypeFromColumnName(col.name);
+            if (suggested && suggested !== 'Text') {
+                onTypeChange(idx, suggested);
+            }
+        });
+    }, [schema, schemaHints, onTypeChange]);
+
     const filteredSchema = useMemo(() => {
         if (!searchQuery.trim()) return schema;
         const q = searchQuery.toLowerCase().trim();
@@ -96,53 +113,29 @@ export const Mapping: React.FC<MappingProps> = ({
         overscan: 10,
     });
 
+    const typeSummary = useMemo(() => {
+        const counts: Record<ColumnType, number> = {} as Record<ColumnType, number>;
+        TYPES.forEach((t) => { counts[t] = 0; });
+        schema.forEach((col) => {
+            counts[col.detected_type] = (counts[col.detected_type] ?? 0) + 1;
+        });
+        return Object.entries(counts)
+            .filter(([, n]) => n > 0)
+            .map(([type, n]) => `${n} ${type}`)
+            .join(', ');
+    }, [schema]);
+
     return (
         <div className="h-full flex flex-col">
-            {/* Top Pane: Raw Preview (compact) */}
-            <div className="h-[28%] min-h-[160px] flex flex-col border-b bg-muted/10">
-                <div className="px-4 py-2 border-b bg-background flex items-center justify-between">
-                    <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <FileType size={16} /> Raw Data Preview
-                    </h3>
-                    <span className="text-xs text-muted-foreground">First 10 rows</span>
-                </div>
-                <div className="flex-1 overflow-auto">
-                    <table className="w-full text-xs text-left border-collapse">
-                        <thead className="bg-muted sticky top-0 z-10 text-muted-foreground font-medium">
-                            <tr>
-                                <th className="p-2 border-b w-12 text-center">#</th>
-                                {schema.slice(0, 20).map((col, idx) => (
-                                    <th key={idx} className="p-2 border-b border-l font-normal truncate max-w-[160px]">
-                                        {col.name}
-                                    </th>
-                                ))}
-                                {schema.length > 20 && (
-                                    <th className="p-2 border-b border-l text-muted-foreground">+{schema.length - 20}</th>
-                                )}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {Object.entries(sampleRows).slice(0, 5).map(([rowIndex, row]) => (
-                                <tr key={rowIndex} className="border-b hover:bg-muted/50">
-                                    <td className="p-2 text-center text-muted-foreground">{parseInt(rowIndex) + 1}</td>
-                                    {row.slice(0, 20).map((cell, cellIndex) => (
-                                        <td key={cellIndex} className="p-2 border-l font-mono text-muted-foreground truncate max-w-[160px]">
-                                            {cell}
-                                        </td>
-                                    ))}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {/* Bottom Pane: Column Mapper with virtualized list */}
             <div className="flex-1 flex flex-col overflow-hidden bg-background">
                 <div className="px-4 py-3 border-b flex items-center justify-between bg-background z-20 shadow-sm flex-wrap gap-2">
                     <div>
                         <h2 className="text-lg font-bold">Map Columns</h2>
-                        <p className="text-xs text-muted-foreground">Define data types for validation</p>
+                        <p className="text-xs text-muted-foreground">
+                            {fileName
+                                ? `${fileName} · ${rowCount.toLocaleString()} rows · ${schema.length} columns`
+                                : 'Define data types for validation'}
+                        </p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                         <div className="relative w-[200px]">
@@ -151,10 +144,19 @@ export const Mapping: React.FC<MappingProps> = ({
                                 placeholder="Search column..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pl-8 h-9 text-sm"
+                                className="pl-8 pr-8 h-9 text-sm"
                             />
+                            {searchQuery && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded"
+                                    aria-label="Clear search"
+                                >
+                                    <X size={14} />
+                                </button>
+                            )}
                         </div>
-                        
                         <Button
                             variant="outline"
                             size="sm"
@@ -190,13 +192,20 @@ export const Mapping: React.FC<MappingProps> = ({
                                 </DialogFooter>
                             </DialogContent>
                         </Dialog>
-                        <Button
-                            onClick={onConfirm}
-                            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm h-9 px-4"
-                        >
-                            <Check size={16} />
-                            Confirm Schema
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            {typeSummary && (
+                                <span className="text-xs text-muted-foreground hidden sm:inline">
+                                    {typeSummary}
+                                </span>
+                            )}
+                            <Button
+                                onClick={onConfirm}
+                                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm h-9 px-4"
+                            >
+                                <Check size={16} />
+                                Confirm Schema
+                            </Button>
+                        </div>
                     </div>
                 </div>
 
@@ -207,6 +216,25 @@ export const Mapping: React.FC<MappingProps> = ({
                         <span>Sample</span>
                     </div>
                     <div ref={parentRef} className="flex-1 overflow-auto min-h-0 rounded-md border border-border bg-background">
+                        {filteredSchema.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                                <p className="text-sm text-muted-foreground">
+                                    {searchQuery
+                                        ? `No columns match "${searchQuery}".`
+                                        : 'No columns to show.'}
+                                </p>
+                                {searchQuery && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-3"
+                                        onClick={() => setSearchQuery('')}
+                                    >
+                                        Clear search
+                                    </Button>
+                                )}
+                            </div>
+                        ) : (
                         <div
                             style={{
                                 height: `${virtualizer.getTotalSize()}px`,
@@ -258,8 +286,9 @@ export const Mapping: React.FC<MappingProps> = ({
                                 );
                             })}
                         </div>
+                        )}
                     </div>
-                    {searchQuery && (
+                    {searchQuery && filteredSchema.length > 0 && (
                         <p className="text-xs text-muted-foreground mt-2 shrink-0">
                             Showing {filteredSchema.length} of {schema.length} columns
                         </p>

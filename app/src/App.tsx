@@ -20,6 +20,7 @@ function App() {
     setPrivacyShieldStatus,
     bumpWorkspaceListVersion,
     activeWorkspaceId,
+    fileMetadata,
   } = useWorkspace();
 
   const {
@@ -45,6 +46,7 @@ function App() {
   } = useDataStream();
 
   const [selectedSchema, setSelectedSchema] = useState<SchemaDefinition | null>(() => getSchemaById(CUSTOM_SCHEMA_ID) ?? null);
+  const [selectedPreset, setSelectedPreset] = useState<SchemaPreset | null>(null);
 
   const [isValidating, setIsValidating] = useState(false);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
@@ -65,12 +67,15 @@ function App() {
     setPresets(SchemaStorage.list());
   };
 
-  const handleApplyPreset = (preset: SchemaPreset) => {
-    schema.forEach((col, idx) => {
-        const savedType = preset.mapping[col.name];
-        if (savedType) updateColumnType(idx, savedType);
-    });
-  };
+  const handleDeletePreset = useCallback((preset: SchemaPreset) => {
+    SchemaStorage.remove(preset.id);
+    setPresets(SchemaStorage.list());
+    if (selectedPreset?.id === preset.id) {
+      setSelectedPreset(null);
+      setSelectedSchema(getSchemaById(CUSTOM_SCHEMA_ID) ?? null);
+    }
+  }, [selectedPreset?.id]);
+
 
   const handleFileSelect = useCallback(
     async (file: File) => {
@@ -209,8 +214,17 @@ function App() {
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {stage === 'SCHEMA' && (
           <SchemaSelect
-            selectedId={selectedSchema?.id ?? null}
-            onSelect={setSelectedSchema}
+            presets={presets}
+            selectedId={selectedPreset?.id ?? selectedSchema?.id ?? null}
+            onSelectSchema={(schema) => {
+              setSelectedSchema(schema);
+              setSelectedPreset(null);
+            }}
+            onSelectPreset={(preset) => {
+              setSelectedPreset(preset);
+              setSelectedSchema(null);
+            }}
+            onDeletePreset={handleDeletePreset}
             onContinue={goToIngestion}
           />
         )}
@@ -230,9 +244,9 @@ function App() {
             onTypeChange={updateColumnType}
             onConfirm={confirmSchema}
             onSavePreset={handleSavePreset}
-            onLoadPreset={handleApplyPreset}
-            presets={presets}
-            schemaHints={selectedSchema?.columnHints}
+            schemaHints={selectedPreset?.mapping ?? selectedSchema?.columnHints}
+            fileName={fileMetadata?.name}
+            rowCount={rowCount}
           />
         )}
 
