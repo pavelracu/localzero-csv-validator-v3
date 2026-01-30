@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ColumnSchema, ColumnType, DatasetSummary, Suggestion, SuggestionReport } from '../types';
 import DataWorker from '../workers/data.worker?worker';
 
-export type AppStage = 'IMPORT' | 'SCHEMA' | 'PROCESSING' | 'STUDIO';
+export type AppStage = 'SCHEMA' | 'INGESTION' | 'PROCESSING' | 'STUDIO';
 
 export interface UseDataStreamReturn {
     isReady: boolean;
     stage: AppStage;
+    goToIngestion: () => void;
     schema: ColumnSchema[];
     initialSchema: ColumnSchema[];
     rowCount: number;
@@ -30,7 +31,7 @@ export interface UseDataStreamReturn {
 
 export function useDataStream(): UseDataStreamReturn {
     const [isReady, setIsReady] = useState(false);
-    const [stage, setStage] = useState<AppStage>('IMPORT');
+    const [stage, setStage] = useState<AppStage>('SCHEMA');
     const [schema, setSchema] = useState<ColumnSchema[]>([]);
     const [initialSchema, setInitialSchema] = useState<ColumnSchema[]>([]);
     const [rowCount, setRowCount] = useState(0);
@@ -202,10 +203,14 @@ export function useDataStream(): UseDataStreamReturn {
                 worker.postMessage({ type: 'LOAD_FILE', payload: bytes }, [bytes.buffer]);
             });
 
-            setStage('SCHEMA');
+            // Stay in INGESTION; UI shows mapping when rowCount > 0
         } finally {
             setIsLoadingFile(false);
         }
+    }, []);
+
+    const goToIngestion = useCallback(() => {
+        setStage('INGESTION');
     }, []);
 
     const updateColumnType = useCallback(async (colIdx: number, newType: ColumnType) => {
@@ -392,6 +397,7 @@ export function useDataStream(): UseDataStreamReturn {
         pendingValidation, 
         isLoadingFile,
         dataVersion,
+        goToIngestion,
         loadFile, 
         fetchRows, 
         updateColumnType, 

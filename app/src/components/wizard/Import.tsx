@@ -1,8 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { FileUp, ShieldCheck, Loader2 } from 'lucide-react';
+import { FileUp, Loader2 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 interface ImportProps {
   onFileSelect: (file: File) => Promise<void>;
@@ -42,8 +41,8 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady, isLoading
       <div className="w-full max-w-3xl space-y-8">
         
         <div className="text-center space-y-2">
-          <h2 className="text-3xl font-bold tracking-tight text-foreground">Import Data</h2>
-          <p className="text-muted-foreground">Your data never leaves this device.</p>
+          <h2 className="text-3xl font-bold tracking-tight text-foreground">Load CSV</h2>
+          <p className="text-muted-foreground">Drag & drop or click to browse.</p>
         </div>
 
         <Card
@@ -70,18 +69,11 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady, isLoading
                 <FileUp size={32} className="text-primary" />
               )}
            </div>
-           <Badge variant="outline" className="mb-3 gap-1.5 border-emerald-200 bg-emerald-50/50">
-             <ShieldCheck size={12} className="text-emerald-600" />
-             <span className="text-emerald-700 text-xs font-medium">Offline — Data never leaves your device</span>
-           </Badge>
            <h3 className="text-lg font-semibold text-foreground mb-1">
-              {isLoadingFile ? 'Loading file…' : 'Load CSV Data File'}
+              {isLoadingFile ? 'Loading file…' : 'Load CSV'}
            </h3>
-           <p className="text-sm text-muted-foreground mb-2">
-              {isLoadingFile ? 'Parsing locally. No data is uploaded.' : 'Process up to 1GB. 100% in your browser.'}
-           </p>
-           <p className="text-xs text-muted-foreground mb-6">
-              {isLoadingFile ? 'Please wait…' : 'Drag & drop or click to browse'}
+           <p className="text-sm text-muted-foreground mb-6">
+              {isLoadingFile ? 'Parsing locally…' : 'Process up to 1GB. 100% in your browser.'}
            </p>
            
            <input 

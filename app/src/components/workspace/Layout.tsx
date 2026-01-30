@@ -44,7 +44,7 @@ export function Layout({
   children,
 }: LayoutProps) {
   const { hasActiveFile } = useWorkspace();
-  const showStatusBar = stage === 'SCHEMA' || stage === 'STUDIO';
+  const showStatusBar = (stage === 'INGESTION' && rowCount > 0) || stage === 'STUDIO';
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-background">

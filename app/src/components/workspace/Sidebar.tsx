@@ -12,19 +12,22 @@ interface SidebarProps {
 }
 
 const PIPELINE_STEPS = [
-  { key: 'upload', label: '01 UPLOAD', sublabel: (ctx: { fileSizeGB?: string }) => ctx.fileSizeGB ? `${ctx.fileSizeGB} Buffered` : 'Awaiting file' },
-  { key: 'map', label: '02 MAP & TRIAGE', sublabel: (ctx: { schemaLength?: number; rowCount?: number }) => ctx.schemaLength != null && ctx.rowCount != null ? `${ctx.schemaLength} cols / ${ctx.rowCount.toLocaleString()} rows` : 'Awaiting maps' },
-  { key: 'validate', label: '03 VALIDATE', sublabel: () => 'Awaiting Maps' },
+  { key: 'schema', label: '01 SCHEMA', sublabel: () => 'Select standard' },
+  { key: 'ingestion', label: '02 INGESTION', sublabel: (ctx: { fileSizeGB?: string; schemaLength?: number; rowCount?: number }) => ctx.rowCount != null && ctx.rowCount > 0 ? `${ctx.schemaLength ?? 0} cols / ${ctx.rowCount.toLocaleString()} rows` : ctx.fileSizeGB ? `${ctx.fileSizeGB} Buffered` : 'Load file' },
+  { key: 'triage', label: '03 TRIAGE', sublabel: () => 'Validate & fix' },
+  { key: 'export', label: '04 EXPORT', sublabel: () => 'Export CSV' },
 ] as const;
 
 function stageToActiveIndex(stage: AppStage): number {
   switch (stage) {
-    case 'IMPORT':
-      return 0;
     case 'SCHEMA':
-    case 'PROCESSING':
-    case 'STUDIO':
+      return 0;
+    case 'INGESTION':
       return 1;
+    case 'PROCESSING':
+      return 2;
+    case 'STUDIO':
+      return 3;
     default:
       return 0;
   }
@@ -70,10 +73,10 @@ export function Sidebar({ stage, rowCount, schema }: SidebarProps) {
                     <span className="shrink-0">
                       {isCompleted ? (
                         <Check size={14} className="text-[var(--success)]" />
-                      ) : isActive && index === 1 ? (
-                        <Network size={14} className="text-primary" />
-                      ) : index === 2 ? (
-                        <Shield size={14} className="text-muted-foreground" />
+                      ) : index === 1 ? (
+                        <Network size={14} className={isActive ? 'text-primary' : 'text-muted-foreground'} />
+                      ) : index === 2 || index === 3 ? (
+                        <Shield size={14} className={isActive ? 'text-primary' : 'text-muted-foreground'} />
                       ) : (
                         <span className="w-3.5 h-3.5 rounded-full border border-muted-foreground/50 opacity-70" />
                       )}
