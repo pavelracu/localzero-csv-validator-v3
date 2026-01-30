@@ -83,9 +83,7 @@ export function Layout({
               </div>
             )}
           </main>
-          {showStatusBar && (
-            <StatusBar rowCount={rowCount} errorCount={errorCount} />
-          )}
+          
         </div>
       </div>
       <SystemVitalsHeader
