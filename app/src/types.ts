@@ -45,3 +45,27 @@ export interface SchemaPreset {
     mapping: Record<string, ColumnType>; // ColumnName -> Type mapping
     lastUsed: number;
 }
+
+// --- Workspace / session persistence (metadata only, no file content) ---
+
+export interface FileMetadata {
+    name: string;
+    size: number;
+    hash?: string;
+}
+
+export interface TriageLogEntry {
+    at: number;       // timestamp
+    colIdx: number;
+    action: string;   // e.g. 'applyCorrection' | 'applySuggestion' | 'updateCell'
+    suggestion?: string;
+}
+
+export interface WorkspaceMeta {
+    id: string;
+    createdAt: number;
+    updatedAt: number;
+    fileMetadata: FileMetadata;
+    schemaSnapshot: Record<string, ColumnType>;
+    triageLog: TriageLogEntry[];
+}

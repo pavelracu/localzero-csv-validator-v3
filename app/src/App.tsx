@@ -1,38 +1,48 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useDataStream } from './hooks/useDataStream';
 import { VirtualizedTable } from './components/grid/VirtualizedTable';
 import { Import } from './components/wizard/Import';
 import { Mapping } from './components/wizard/Mapping';
 import { Loader2 } from 'lucide-react';
-import { AppHeader } from './components/layout/AppHeader';
-import { StatusBar } from './components/layout/StatusBar';
-import { StepIndicator } from './components/layout/StepIndicator';
+import { Layout } from './components/workspace/Layout';
 import { SchemaStorage } from './lib/storage';
-import { SchemaPreset } from './types';
+import { putWorkspace, addTriageLogEntry, updateSchemaSnapshot } from './lib/workspaceDb';
+import { useWorkspace } from './contexts/WorkspaceContext';
+import { SchemaPreset, type ColumnType, type Suggestion } from './types';
 
 function App() {
-  const { 
-    isReady, 
+  const {
+    setActiveWorkspace,
+    setFileMetadata,
+    setPrivacyShieldStatus,
+    bumpWorkspaceListVersion,
+    activeWorkspaceId,
+  } = useWorkspace();
+
+  const {
+    isReady,
     stage,
-    schema, 
-    rowCount, 
-    errors, 
+    schema,
+    rowCount,
+    errors,
     pendingValidation,
     isLoadingFile,
     dataVersion,
-    loadFile, 
-    fetchRows, 
+    loadFile,
+    fetchRows,
     updateColumnType,
     runBatchValidation,
-    applyCorrection,
+    applyCorrection: applyCorrectionBase,
     getSuggestions,
-    applySuggestion,
+    applySuggestion: applySuggestionBase,
     getRow,
     updateCell,
-    confirmSchema
+    confirmSchema: confirmSchemaBase,
   } = useDataStream();
 
   const [isValidating, setIsValidating] = useState(false);
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const [isPersisting, setIsPersisting] = useState(false);
   const [schemaSamples, setSchemaSamples] = useState<Record<number, string[]>>({});
 
   useEffect(() => {
@@ -55,6 +65,82 @@ function App() {
         if (savedType) updateColumnType(idx, savedType);
     });
   };
+
+  const handleFileSelect = useCallback(
+    async (file: File) => {
+      try {
+        await loadFile(file);
+        setIsSavingWorkspace(true);
+        setIsPersisting(true);
+        const id = crypto.randomUUID();
+        const now = Date.now();
+        const fileMetadata = { name: file.name, size: file.size };
+        await putWorkspace({
+          id,
+          createdAt: now,
+          updatedAt: now,
+          fileMetadata,
+          schemaSnapshot: {},
+          triageLog: [],
+        });
+        setActiveWorkspace(id);
+        setFileMetadata(fileMetadata);
+        setPrivacyShieldStatus('local-only');
+        bumpWorkspaceListVersion();
+      } catch (err) {
+        console.error('Workspace initialization failed', err);
+        throw err;
+      } finally {
+        setIsSavingWorkspace(false);
+        setIsPersisting(false);
+      }
+    },
+    [loadFile, setActiveWorkspace, setFileMetadata, setPrivacyShieldStatus, bumpWorkspaceListVersion]
+  );
+
+  const applyCorrection = useCallback(
+    async (colIdx: number, strategy: string) => {
+      await applyCorrectionBase(colIdx, strategy);
+      if (activeWorkspaceId) {
+        await addTriageLogEntry(activeWorkspaceId, {
+          at: Date.now(),
+          colIdx,
+          action: 'applyCorrection',
+          suggestion: strategy,
+        });
+      }
+    },
+    [applyCorrectionBase, activeWorkspaceId]
+  );
+
+  const applySuggestion = useCallback(
+    async (colIdx: number, suggestion: Suggestion) => {
+      await applySuggestionBase(colIdx, suggestion);
+      if (activeWorkspaceId) {
+        await addTriageLogEntry(activeWorkspaceId, {
+          at: Date.now(),
+          colIdx,
+          action: 'applySuggestion',
+          suggestion: JSON.stringify(suggestion),
+        });
+      }
+    },
+    [applySuggestionBase, activeWorkspaceId]
+  );
+
+  const confirmSchema = useCallback(async () => {
+    await confirmSchemaBase();
+    if (activeWorkspaceId) {
+      const schemaSnapshot = schema.reduce(
+        (acc, col) => {
+          acc[col.name] = col.detected_type;
+          return acc;
+        },
+        {} as Record<string, ColumnType>
+      );
+      await updateSchemaSnapshot(activeWorkspaceId, schemaSnapshot);
+    }
+  }, [confirmSchemaBase, activeWorkspaceId, schema]);
 
   const handleExportCSV = async () => {
     if (rowCount === 0 || schema.length === 0) return;
@@ -96,46 +182,47 @@ function App() {
   };
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-background">
-      <AppHeader 
-        isReady={isReady}
-        stage={stage}
-        pendingValidationCount={pendingValidation.size}
-        isValidating={isValidating}
-        onRunValidation={async () => {
-          setIsValidating(true);
-          await runBatchValidation();
-          setIsValidating(false);
-        }}
-        onExport={handleExportCSV}
-        canExport={stage === 'STUDIO' && rowCount > 0}
-      />
-      
-      {stage !== 'IMPORT' && <StepIndicator currentStage={stage} />}
-      
-      <main className="flex-1 overflow-hidden relative flex flex-col">
+    <Layout
+      isReady={isReady}
+      stage={stage}
+      rowCount={rowCount}
+      errorCount={errors.size}
+      schema={schema}
+      isSavingWorkspace={isSavingWorkspace}
+      isPersisting={isPersisting}
+      pendingValidationCount={pendingValidation.size}
+      isValidating={isValidating}
+      onRunValidation={async () => {
+        setIsValidating(true);
+        await runBatchValidation();
+        setIsValidating(false);
+      }}
+      onExport={handleExportCSV}
+      canExport={stage === 'STUDIO' && rowCount > 0}
+    >
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {stage === 'IMPORT' && (
-          <Import 
-            onFileSelect={loadFile}
+          <Import
+            onFileSelect={handleFileSelect}
             isReady={isReady}
             isLoadingFile={isLoadingFile}
           />
         )}
 
         {stage === 'SCHEMA' && (
-        <Mapping
-          schema={schema}
-          sampleRows={schemaSamples}
-          onTypeChange={updateColumnType}
-          onConfirm={confirmSchema}
-          onSavePreset={handleSavePreset}
-          onLoadPreset={handleApplyPreset}
-          presets={presets}
-        />
-      )}
+          <Mapping
+            schema={schema}
+            sampleRows={schemaSamples}
+            onTypeChange={updateColumnType}
+            onConfirm={confirmSchema}
+            onSavePreset={handleSavePreset}
+            onLoadPreset={handleApplyPreset}
+            presets={presets}
+          />
+        )}
 
         {stage === 'STUDIO' && (
-          <VirtualizedTable 
+          <VirtualizedTable
             rowCount={rowCount}
             schema={schema}
             errors={errors}
@@ -152,18 +239,18 @@ function App() {
         )}
 
         {stage === 'PROCESSING' && (
-           <div className="h-full flex flex-col items-center justify-center">
-              <Loader2 className="animate-spin text-primary mb-2" />
-              <p className="text-lg font-medium mb-1">Validating {rowCount.toLocaleString()} rows...</p>
-              <p className="text-sm text-muted-foreground">Validation runs locally — no data is uploaded.</p>
-           </div>
+          <div className="h-full flex flex-col items-center justify-center">
+            <Loader2 className="animate-spin text-primary mb-2" />
+            <p className="text-lg font-medium mb-1">
+              Validating {rowCount.toLocaleString()} rows...
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Validation runs locally — no data is uploaded.
+            </p>
+          </div>
         )}
-      </main>
-
-      {['SCHEMA', 'STUDIO'].includes(stage) && (
-        <StatusBar rowCount={rowCount} errorCount={errors.size} />
-      )}
-    </div>
+      </div>
+    </Layout>
   );
 }
 

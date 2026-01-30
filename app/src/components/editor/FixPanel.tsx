@@ -20,7 +20,7 @@ const SuggestionCard: React.FC<{
     onApply: (suggestion: Suggestion) => Promise<void>;
     isApplying: boolean;
     index: number;
-}> = ({ report, onApply, isApplying, index }) => {
+}> = ({ report, onApply, isApplying }) => {
     return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
             <div className="p-4">

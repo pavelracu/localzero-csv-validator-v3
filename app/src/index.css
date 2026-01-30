@@ -59,6 +59,10 @@
     /* Legacy tokens for components that expect HSL-style values */
     --warning: oklch(0.757 0.158 70.354);
     --success: oklch(0.542 0.168 163.233);
+    /* Enterprise / workspace tokens */
+    --privacy-border-color: oklch(0.542 0.168 163.233);
+    --vitals-bg: oklch(0.9364 0.0055 256.6757);
+    --workspace-sidebar-bg: oklch(0.2244 0.0257 263.8449);
   }
 
   .dark {
@@ -116,6 +120,9 @@
     --spacing: 0.25rem;
     --warning: oklch(0.757 0.158 70.354);
     --success: oklch(0.542 0.168 163.233);
+    --privacy-border-color: oklch(0.542 0.168 163.233);
+    --vitals-bg: oklch(0.2511 0.0145 264.2688);
+    --workspace-sidebar-bg: oklch(0.1659 0.0069 264.3687);
   }
 }
 
@@ -124,7 +131,19 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
     letter-spacing: var(--tracking-normal);
+    @apply bg-background text-foreground;
   }
+}
+
+/* Privacy Border: 4px left trust signal when hasActiveFile (main content area only, excl. sidebar) */
+[data-privacy-active="true"],
+.privacy-border {
+  box-shadow: inset 4px 0 0 0 var(--success);
+}
+
+/* System Vitals: monospace data from theme */
+.vitals-mono {
+  font-family: var(--font-mono);
 }
