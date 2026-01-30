@@ -2,7 +2,8 @@ import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ColumnSchema, ColumnType, Suggestion, SuggestionReport } from '../../types';
 import { AlertTriangle } from 'lucide-react';
-import { FixPanel } from '../editor/FixPanel'; 
+import { FixPanel } from '../editor/FixPanel';
+import { RowDetailPanel } from '../editor/RowDetailPanel';
 import { ColumnHeader } from './ColumnHeader';
 import { Button } from '@/components/ui/button';
 
@@ -19,6 +20,7 @@ interface VirtualizedTableProps {
   getSuggestions: (colIdx: number) => Promise<SuggestionReport[]>;
   applySuggestion: (colIdx: number, suggestion: Suggestion) => Promise<void>;
   applyCorrection: (colIdx: number, strategy: 'clear' | 'revert') => Promise<void>;
+  updateCell: (rowIdx: number, colIdx: number, value: string) => Promise<void>;
 }
 
 const CHUNK_SIZE = 50;
@@ -34,12 +36,14 @@ export function VirtualizedTable({
   onTypeChange, 
   getSuggestions,
   applySuggestion,
-  applyCorrection
+  applyCorrection,
+  updateCell
 }: VirtualizedTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   
   // Minimal state to toggle the sidebar
   const [fixingColumn, setFixingColumn] = useState<number | null>(null);
+  const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [filterMode, setFilterMode] = useState<'all' | 'errors'>('all');
 
   // FORCE UPDATE: The hook's cache is a Ref, so it won't trigger re-renders automatically.
@@ -206,8 +210,13 @@ export function VirtualizedTable({
                   key={virtualRow.key} 
                   data-index={virtualRow.index}
                   ref={rowVirtualizer.measureElement}
-                  className="flex border-b border-border hover:bg-muted/50 h-[35px]"
+                  className="flex border-b border-border hover:bg-muted/50 h-[35px] cursor-pointer"
                   style={{ minWidth: `${50 + schema.length * 150}px` }}
+                  onClick={() => {
+                    if (rowData) {
+                      setSelectedRow(rowIndex);
+                    }
+                  }}
                 >
                    {/* Row Number — only show icon when row has error, no full-row highlight */}
                    <div className="w-[50px] flex-shrink-0 flex items-center justify-center border-r font-mono text-[10px] text-muted-foreground bg-background">
@@ -227,6 +236,12 @@ export function VirtualizedTable({
                            ${isCellError ? 'bg-red-50 ring-1 ring-inset ring-red-200 text-red-700' : ''}
                          `}
                          title={isCellError ? "Validation Error" : cellValue}
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           if (rowData) {
+                             setSelectedRow(rowIndex);
+                           }
+                         }}
                        >
                          {cellValue !== undefined ? cellValue : (
                            <div className="h-2 w-16 bg-muted/20 rounded animate-pulse" />
@@ -255,7 +270,8 @@ export function VirtualizedTable({
           onGetSuggestions={() => getSuggestions(fixingColumn)}
           onApplySuggestion={(suggestion) =>
             applySuggestion(fixingColumn, suggestion).then(() => {
-              setFixingColumn(null);
+              // Don't close the panel - keep it open so user can apply more fixes
+              // The panel will refresh suggestions automatically via errorCount change
               forceUpdate();
             })
           }
@@ -263,6 +279,33 @@ export function VirtualizedTable({
           open={fixingColumn !== null}
         />
       )}
+
+      {/* Row Detail Panel (Conditional Render) */}
+      {selectedRow !== null && (() => {
+        const rowData = getRow(selectedRow);
+        if (!rowData) {
+          // Fetch the row if not available
+          fetchRows(selectedRow, 1).then(() => {
+            forceUpdate();
+          });
+          return null;
+        }
+        return (
+          <RowDetailPanel
+            key={`row-${selectedRow}-${dataVersion}`}
+            rowIndex={selectedRow}
+            rowData={rowData}
+            schema={schema}
+            errors={errors}
+            onUpdateCell={async (rowIdx, colIdx, value) => {
+              await updateCell(rowIdx, colIdx, value);
+              forceUpdate();
+            }}
+            onClose={() => setSelectedRow(null)}
+            open={selectedRow !== null}
+          />
+        );
+      })()}
     </div>
   );
 }

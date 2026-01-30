@@ -24,6 +24,7 @@ export interface UseDataStreamReturn {
     applyCorrection: (colIdx: number, strategy: string) => Promise<void>;
     getSuggestions: (colIdx: number) => Promise<SuggestionReport[]>;
     applySuggestion: (colIdx: number, suggestion: Suggestion) => Promise<void>;
+    updateCell: (rowIdx: number, colIdx: number, value: string) => Promise<void>;
     confirmSchema: () => Promise<void>;
 }
 
@@ -58,7 +59,8 @@ export function useDataStream(): UseDataStreamReturn {
                 type === 'VALIDATE_COLUMN_COMPLETE' || 
                 type === 'CORRECTION_COMPLETE' ||
                 type === 'GET_SUGGESTIONS_COMPLETE' ||
-                type === 'SUGGESTION_COMPLETE'
+                type === 'SUGGESTION_COMPLETE' ||
+                type === 'UPDATE_CELL_COMPLETE'
             ) {
                 const request = pendingRequests.current.get(id);
                 if (request) {
@@ -358,6 +360,28 @@ export function useDataStream(): UseDataStreamReturn {
         }
     }, [schema, validateColumnsSafe]);
 
+    const updateCell = useCallback(async (rowIdx: number, colIdx: number, value: string) => {
+        if (!workerRef.current) return;
+
+        const requestId = `updatecell_${rowIdx}_${colIdx}_${Date.now()}`;
+        try {
+            await new Promise<void>((resolve, reject) => {
+                pendingRequests.current.set(requestId, { resolve, reject });
+                workerRef.current!.postMessage({ type: 'UPDATE_CELL', rowIdx, colIdx, value, id: requestId });
+            });
+            
+            // Revalidate the column after cell update
+            await validateColumnsSafe([colIdx]);
+            
+            // Clear cache for this row
+            rowCache.current.delete(rowIdx);
+            setDataVersion(v => v + 1);
+        } catch (e) {
+            console.error("Update cell failed", e);
+            throw e;
+        }
+    }, [validateColumnsSafe]);
+
     return { 
         isReady, 
         stage, 
@@ -376,6 +400,7 @@ export function useDataStream(): UseDataStreamReturn {
         applyCorrection,
         getSuggestions,
         applySuggestion,
+        updateCell,
         confirmSchema 
     };
 }

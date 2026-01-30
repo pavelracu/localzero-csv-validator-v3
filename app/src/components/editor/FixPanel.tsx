@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ColumnType, Suggestion, SuggestionReport } from '../../types';
-import { Eraser, RotateCcw, AlertTriangle, Wand2, ArrowRight, Loader2 } from 'lucide-react';
+import { Eraser, RotateCcw, AlertTriangle, Wand2, ArrowRight, Loader2, RefreshCw } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -19,7 +19,8 @@ const SuggestionCard: React.FC<{
     report: SuggestionReport;
     onApply: (suggestion: Suggestion) => Promise<void>;
     isApplying: boolean;
-}> = ({ report, onApply, isApplying }) => {
+    index: number;
+}> = ({ report, onApply, isApplying, index }) => {
     return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
             <div className="p-4">
@@ -71,27 +72,55 @@ export const FixPanel: React.FC<FixPanelProps> = ({
 }) => {
     const [suggestions, setSuggestions] = useState<SuggestionReport[]>([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [isApplying, setIsApplying] = useState(false);
+    const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
+    const previousErrorCountRef = useRef<number>(errorCount);
 
-    useEffect(() => {
+    const refreshSuggestions = React.useCallback(() => {
         if (open) {
             setIsLoading(true);
             onGetSuggestions()
                 .then(setSuggestions)
+                .catch((err) => {
+                    console.error('Failed to refresh suggestions:', err);
+                    setSuggestions([]);
+                })
                 .finally(() => setIsLoading(false));
-        } else {
-            setSuggestions([]);
-            setIsApplying(false);
         }
     }, [open, onGetSuggestions]);
 
-    const handleApply = async (suggestion: Suggestion) => {
-        setIsApplying(true);
+    useEffect(() => {
+        if (open) {
+            refreshSuggestions();
+            previousErrorCountRef.current = errorCount;
+        } else {
+            setSuggestions([]);
+            setApplyingIndex(null);
+        }
+    }, [open, refreshSuggestions]);
+
+    // Refresh suggestions when errorCount changes significantly (indicates data state changed)
+    useEffect(() => {
+        if (open && errorCount !== previousErrorCountRef.current) {
+            // Small delay to allow validation to complete
+            const timeoutId = setTimeout(() => {
+                refreshSuggestions();
+                previousErrorCountRef.current = errorCount;
+            }, 300);
+            return () => clearTimeout(timeoutId);
+        }
+    }, [errorCount, open, refreshSuggestions]);
+
+    const handleApply = async (suggestion: Suggestion, index: number) => {
+        setApplyingIndex(index);
         try {
             await new Promise((r) => setTimeout(r, 0));
             await onApplySuggestion(suggestion);
+            // Wait a bit for validation to complete, then refresh suggestions
+            setTimeout(() => {
+                refreshSuggestions();
+            }, 500);
         } finally {
-            setIsApplying(false);
+            setApplyingIndex(null);
         }
     };
 
@@ -111,7 +140,19 @@ export const FixPanel: React.FC<FixPanelProps> = ({
                 <div className="mt-6 space-y-4">
                     {/* Suggested Fixes First */}
                     <div className="space-y-3">
-                        <h3 className="text-sm font-semibold text-foreground">Suggested Fixes</h3>
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-foreground">Suggested Fixes</h3>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={refreshSuggestions}
+                                disabled={isLoading || applyingIndex !== null}
+                                className="h-8"
+                            >
+                                <RefreshCw size={14} className={`mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
+                                Refresh
+                            </Button>
+                        </div>
                         {isLoading && (
                             <>
                                 <p className="text-sm text-muted-foreground">Analyzing column…</p>
@@ -124,8 +165,9 @@ export const FixPanel: React.FC<FixPanelProps> = ({
                                 <SuggestionCard
                                     key={i}
                                     report={report}
-                                    onApply={handleApply}
-                                    isApplying={isApplying}
+                                    onApply={(suggestion) => handleApply(suggestion, i)}
+                                    isApplying={applyingIndex === i}
+                                    index={i}
                                 />
                             ))
                         )}
@@ -143,10 +185,10 @@ export const FixPanel: React.FC<FixPanelProps> = ({
                         </div>
                     </div>
 
-                    <div className={`space-y-3 pt-2 ${isApplying ? 'pointer-events-none opacity-60' : ''}`}>
+                    <div className={`space-y-3 pt-2 ${applyingIndex !== null ? 'pointer-events-none opacity-60' : ''}`}>
                         <div
                             className="flex items-center gap-4 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                            onClick={() => !isApplying && onCorrection('clear')}
+                            onClick={() => applyingIndex === null && onCorrection('clear')}
                         >
                             <div className="p-2 rounded-md bg-amber-100 text-amber-800">
                                 <Eraser size={18} />
@@ -159,7 +201,7 @@ export const FixPanel: React.FC<FixPanelProps> = ({
 
                         <div
                             className="flex items-center gap-4 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                            onClick={() => !isApplying && onCorrection('revert')}
+                            onClick={() => applyingIndex === null && onCorrection('revert')}
                         >
                             <div className="p-2 rounded-md bg-gray-100 text-gray-600">
                                 <RotateCcw size={18} />

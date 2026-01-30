@@ -17,7 +17,19 @@ export type Suggestion =
     | { DigitsOnly: null }
     | { PhoneStripToTenDigits: null }
     | { NormalizeDateToIso: null }
-    | { NormalizeBooleanCase: null };
+    | { NormalizeBooleanCase: null }
+    | { MaskEmail: null }
+    | { RedactSSN: null }
+    | { RedactCreditCard: null }
+    | { ZeroIPv4: null }
+    | { NormalizeBooleanExtended: null }
+    | { NormalizeDateCascade: null }
+    | { FuzzyMatchCategorical: { master_list: string[]; max_distance: number } }
+    | { NormalizeEmail: null }
+    | { NormalizePhoneE164: null }
+    | { FormatPhoneUS: null }
+    | { PadZipLeadingZeros: null }
+    | { NormalizeStateAbbrev: null };
 
 export interface SuggestionReport {
     suggestion: Suggestion;

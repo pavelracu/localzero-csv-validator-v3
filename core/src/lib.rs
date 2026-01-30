@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 
 mod engine;
-use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}, mechanic};
+use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}, mechanic, pii};
 
 // GLOBAL STATE (The "Database" in Memory)
 lazy_static! {
@@ -128,40 +128,87 @@ pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usiz
         // A better approach would be to iterate only the invalid rows, which we'd need to find first.
         for row_idx in 0..df.rows {
             if let Some(old_val) = df.get_cell(row_idx, col_idx) {
-                if !col_type.is_valid(&old_val) {
-                     let new_val = match &suggestion {
-                        mechanic::Suggestion::TrimWhitespace => {
-                            old_val.trim().to_string()
-                        },
-                        mechanic::Suggestion::RemoveChars { chars } => {
-                            old_val.replace(chars, "")
-                        },
-                        mechanic::Suggestion::DigitsOnly => {
-                            old_val.chars().filter(|c| c.is_ascii_digit()).collect()
-                        },
-                        mechanic::Suggestion::PhoneStripToTenDigits => {
-                            mechanic::normalize_phone_to_ten_digits(&old_val)
-                        },
-                        mechanic::Suggestion::NormalizeDateToIso => {
-                            let trimmed = old_val.trim();
-                            if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%m/%d/%Y") {
-                                d.format("%Y-%m-%d").to_string()
-                            } else {
-                                old_val.clone()
-                            }
-                        },
-                        mechanic::Suggestion::NormalizeBooleanCase => {
-                            old_val.trim().to_lowercase()
-                        },
-                    };
+                let (new_val, is_redaction) = match &suggestion {
+                    mechanic::Suggestion::TrimWhitespace => (old_val.trim().to_string(), false),
+                    mechanic::Suggestion::RemoveChars { chars } => (old_val.replace(chars, ""), false),
+                    mechanic::Suggestion::DigitsOnly => (old_val.chars().filter(|c| c.is_ascii_digit()).collect(), false),
+                    mechanic::Suggestion::PhoneStripToTenDigits => (mechanic::normalize_phone_to_ten_digits(&old_val), false),
+                    mechanic::Suggestion::NormalizeDateToIso => {
+                        let trimmed = old_val.trim();
+                        let v = if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%m/%d/%Y") {
+                            d.format("%Y-%m-%d").to_string()
+                        } else {
+                            old_val.clone()
+                        };
+                        (v, false)
+                    },
+                    mechanic::Suggestion::NormalizeBooleanCase => (old_val.trim().to_lowercase(), false),
+                    mechanic::Suggestion::MaskEmail => (pii::mask_email(&old_val), true),
+                    mechanic::Suggestion::RedactSSN => (pii::redact_ssn(&old_val), true),
+                    mechanic::Suggestion::RedactCreditCard => (pii::redact_credit_card(&old_val), true),
+                    mechanic::Suggestion::ZeroIPv4 => (pii::zero_ipv4(&old_val), true),
+                    mechanic::Suggestion::NormalizeBooleanExtended => {
+                        let v = mechanic::normalize_boolean_extended(&old_val)
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| old_val.clone());
+                        (v, false)
+                    },
+                    mechanic::Suggestion::NormalizeDateCascade => (mechanic::parse_date_cascade(&old_val), false),
+                    mechanic::Suggestion::FuzzyMatchCategorical { master_list, max_distance } => {
+                        let v = mechanic::fuzzy_match_best(&old_val, master_list, *max_distance)
+                            .unwrap_or_else(|| old_val.clone());
+                        (v, false)
+                    },
+                    mechanic::Suggestion::NormalizeEmail => {
+                        let v = pii::normalize_email(&old_val).unwrap_or_else(|| pii::email_remove_duplicate_at(&old_val));
+                        (v, false)
+                    },
+                    mechanic::Suggestion::NormalizePhoneE164 => (
+                        mechanic::normalize_phone_e164(&old_val).unwrap_or_else(|| old_val.clone()),
+                        false,
+                    ),
+                    mechanic::Suggestion::FormatPhoneUS => (
+                        mechanic::format_phone_us(&old_val).unwrap_or_else(|| old_val.clone()),
+                        false,
+                    ),
+                    mechanic::Suggestion::PadZipLeadingZeros => (
+                        mechanic::pad_zip_leading_zeros(&old_val).unwrap_or_else(|| old_val.clone()),
+                        false,
+                    ),
+                    mechanic::Suggestion::NormalizeStateAbbrev => (
+                        mechanic::normalize_state_abbrev(&old_val).unwrap_or_else(|| old_val.clone()),
+                        false,
+                    ),
+                };
 
-                    if new_val != old_val && col_type.is_valid(&new_val) {
-                        df.patches
-                            .entry(row_idx)
-                            .or_insert_with(HashMap::new)
-                            .insert(col_idx, new_val);
-                        fixed_count += 1;
-                    }
+                let should_apply = if is_redaction {
+                    let matches = match &suggestion {
+                        mechanic::Suggestion::MaskEmail => pii::is_email_like(&old_val),
+                        mechanic::Suggestion::RedactSSN => pii::is_ssn_like(&old_val),
+                        mechanic::Suggestion::RedactCreditCard => pii::looks_like_credit_card(&old_val),
+                        mechanic::Suggestion::ZeroIPv4 => pii::is_ipv4_like(&old_val),
+                        _ => false,
+                    };
+                    matches && new_val != old_val
+                } else if matches!(
+                    suggestion,
+                    mechanic::Suggestion::FuzzyMatchCategorical { .. }
+                        | mechanic::Suggestion::NormalizeEmail
+                        | mechanic::Suggestion::NormalizePhoneE164
+                        | mechanic::Suggestion::PadZipLeadingZeros
+                        | mechanic::Suggestion::NormalizeStateAbbrev
+                ) {
+                    new_val != old_val
+                } else {
+                    !col_type.is_valid(&old_val) && new_val != old_val && col_type.is_valid(&new_val)
+                };
+
+                if should_apply {
+                    df.patches
+                        .entry(row_idx)
+                        .or_insert_with(HashMap::new)
+                        .insert(col_idx, new_val);
+                    fixed_count += 1;
                 }
             }
         }
@@ -271,4 +318,16 @@ pub fn update_schema(schema_js: JsValue) -> Result<(), JsValue> {
         }
     }
     Ok(())
+}
+
+#[wasm_bindgen]
+pub fn update_cell(row_idx: usize, col_idx: usize, value: String) -> Result<(), JsValue> {
+    let mut store = DATASET.lock().unwrap();
+    if let Some(df) = store.as_mut() {
+        df.update_cell(row_idx, col_idx, value)
+            .map_err(|e| JsValue::from_str(&e))?;
+        Ok(())
+    } else {
+        Err(JsValue::from_str("No dataset loaded"))
+    }
 }

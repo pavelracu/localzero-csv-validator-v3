@@ -28,6 +28,7 @@ function App() {
     getSuggestions,
     applySuggestion,
     getRow,
+    updateCell,
     confirmSchema
   } = useDataStream();
 
@@ -146,6 +147,7 @@ function App() {
             getSuggestions={getSuggestions}
             applySuggestion={applySuggestion}
             applyCorrection={applyCorrection}
+            updateCell={updateCell}
           />
         )}
 

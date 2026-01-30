@@ -66,6 +66,22 @@ impl DataFrame {
         }
     }
 
+    pub fn update_cell(&mut self, row_idx: usize, col_idx: usize, value: String) -> Result<(), String> {
+        if row_idx >= self.rows {
+            return Err(format!("Row index {} out of bounds (max: {})", row_idx, self.rows - 1));
+        }
+        if col_idx >= self.columns.len() {
+            return Err(format!("Column index {} out of bounds (max: {})", col_idx, self.columns.len() - 1));
+        }
+        
+        self.patches
+            .entry(row_idx)
+            .or_insert_with(HashMap::new)
+            .insert(col_idx, value);
+        
+        Ok(())
+    }
+
     // Helper to get a full row (merging raw + patches)
     pub fn get_row(&self, row_idx: usize) -> Option<Vec<String>> {
          if row_idx >= self.rows {

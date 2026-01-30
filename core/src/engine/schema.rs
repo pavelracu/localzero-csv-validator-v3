@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use regex::Regex;
 use lazy_static::lazy_static;
@@ -42,11 +43,16 @@ impl ColumnType {
                 // "Ensure Boolean checks are simple string comparisons ("true"/"false")."
                 value == "true" || value == "false"
             },
-            ColumnType::Email => EMAIL_REGEX.is_match(value),
+            ColumnType::Email => {
+                email_address::EmailAddress::from_str(value.trim()).is_ok()
+                    || EMAIL_REGEX.is_match(value)
+            },
             ColumnType::PhoneUS => PHONE_US_REGEX.is_match(value),
             ColumnType::Date => {
-                 if chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() { return true; }
-                 if chrono::NaiveDate::parse_from_str(value, "%m/%d/%Y").is_ok() { return true; }
+                 if chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").is_ok() { return true; }
+                 if chrono::NaiveDate::parse_from_str(value.trim(), "%m/%d/%Y").is_ok() { return true; }
+                 if chrono::NaiveDate::parse_from_str(value.trim(), "%d-%m-%Y").is_ok() { return true; }
+                 if chrono::NaiveDate::parse_from_str(value.trim(), "%Y/%m/%d").is_ok() { return true; }
                  false
             }
         }

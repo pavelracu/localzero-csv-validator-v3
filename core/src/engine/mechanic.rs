@@ -2,21 +2,118 @@ use serde::{Serialize, Deserialize};
 use std::collections::{HashMap, HashSet};
 use super::dataframe::DataFrame;
 use super::schema::ColumnType;
+use super::pii;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Suggestion {
     TrimWhitespace,
     RemoveChars { chars: String },
     DigitsOnly,
-    /// Strip to digits then take 10 digits (drop country code 1 and/or extension)
     PhoneStripToTenDigits,
     NormalizeDateToIso,
     NormalizeBooleanCase,
+    // PII redaction (apply when value matches pattern; result not validated)
+    MaskEmail,
+    RedactSSN,
+    RedactCreditCard,
+    ZeroIPv4,
+    // Boolean: yes/no/1/0/on/off -> true/false
+    NormalizeBooleanExtended,
+    // Date: try multiple formats -> ISO; fallback 1970-01-01
+    NormalizeDateCascade,
+    // Fuzzy: replace with closest master list value if distance <= max_distance
+    FuzzyMatchCategorical { master_list: Vec<String>, max_distance: u32 },
+    // Tier 2: Format normalization (RFC / E.164 / ISO 8601)
+    NormalizeEmail,       // Remove duplicate @, trim, RFC-style
+    NormalizePhoneE164,  // E.164: +1XXXXXXXXXX, strip extensions
+    FormatPhoneUS,       // Format to US format: (XXX) XXX-XXXX or XXX-XXX-XXXX
+    PadZipLeadingZeros,  // US ZIP: pad to 5 digits
+    NormalizeStateAbbrev, // US state abbreviation -> full name
 }
 
+/// Boolean extended: true,t,yes,y,1,on,enabled -> true; false,f,no,n,0,off,disabled -> false (case insensitive).
+pub fn normalize_boolean_extended(s: &str) -> Option<&'static str> {
+    let t = s.trim().to_lowercase();
+    if t.is_empty() {
+        return None;
+    }
+    match t.as_str() {
+        "true" | "t" | "yes" | "y" | "1" | "on" | "enabled" => Some("true"),
+        "false" | "f" | "no" | "n" | "0" | "off" | "disabled" => Some("false"),
+        _ => None,
+    }
+}
+
+/// Date cascade: try YYYY-MM-DD, MM/DD/YYYY, DD-MM-YYYY, YYYY/MM/DD; fallback 1970-01-01.
+pub fn parse_date_cascade(s: &str) -> String {
+    let t = s.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    const FORMATS: &[&str] = &["%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"];
+    for fmt in FORMATS {
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(t, fmt) {
+            return d.format("%Y-%m-%d").to_string();
+        }
+    }
+    "1970-01-01".to_string()
+}
+
+/// Levenshtein distance between two strings.
+pub fn levenshtein(a: &str, b: &str) -> u32 {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let n = a.len();
+    let m = b.len();
+    if n == 0 {
+        return m as u32;
+    }
+    if m == 0 {
+        return n as u32;
+    }
+    let mut prev = (0..=m as u32).collect::<Vec<_>>();
+    for (i, &ca) in a.iter().enumerate() {
+        let mut curr = vec![i as u32 + 1];
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            curr.push((prev[j].saturating_add(cost))
+                .min(curr[j].saturating_add(1))
+                .min(prev[j + 1].saturating_add(1)));
+        }
+        prev = curr;
+    }
+    prev[m]
+}
+
+/// Best match from master list (min Levenshtein); None if min distance > max_distance.
+pub fn fuzzy_match_best(s: &str, master_list: &[String], max_distance: u32) -> Option<String> {
+    let s_lower = s.trim().to_lowercase();
+    if s_lower.is_empty() {
+        return None;
+    }
+    let mut best: Option<(String, u32)> = None;
+    for m in master_list {
+        let d = levenshtein(&s_lower, &m.to_lowercase());
+        if d <= max_distance && best.as_ref().map_or(true, |(_, bd)| d < *bd) {
+            best = Some((m.clone(), d));
+        }
+    }
+    best.map(|(s, _)| s)
+}
+
+/// US state names for fuzzy matching (master list).
+const US_STATES: &[&str] = &[
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut",
+    "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
+    "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan",
+    "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+    "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+    "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+    "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
+    "Wisconsin", "Wyoming",
+];
+
 /// Normalize phone to 10 digits only when there are clearly extra digits (extension).
-/// High-confidence: we only take first 10 when len > 11 (obvious extension, e.g. x46270).
-/// We do NOT transform 11-digit numbers (could be 1+10 or 10+extension) — that would be guessing.
 pub fn normalize_phone_to_ten_digits(s: &str) -> String {
     let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
     if digits.len() == 10 {
@@ -26,6 +123,129 @@ pub fn normalize_phone_to_ten_digits(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// E.164 normalization: strip non-digits except leading +, default US=1, strip extensions (x, ext.).
+/// Output: +1XXXXXXXXXX for US. Extensions stripped (stored separately in real systems).
+pub fn normalize_phone_e164(s: &str) -> Option<String> {
+    let t = s.trim();
+    let lower = t.to_lowercase();
+    let ext_markers = [" x", "x", " ext", "ext", "ext.", " extension"];
+    let main_str = ext_markers
+        .iter()
+        .filter_map(|m| lower.find(m).map(|pos| t[..pos].trim()))
+        .find(|s| !s.is_empty())
+        .unwrap_or(t);
+    let has_plus = main_str.starts_with('+');
+    let digits: String = main_str.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let num = if digits.len() == 10 && !has_plus {
+        format!("+1{}", digits)
+    } else if digits.len() == 11 && digits.starts_with('1') {
+        format!("+{}", digits)
+    } else if digits.len() >= 10 && digits.len() <= 11 {
+        format!("+{}", digits)
+    } else if digits.len() > 11 {
+        format!("+{}", &digits[..11])
+    } else {
+        return None;
+    };
+    Some(num)
+}
+
+/// Format phone number to US format: (XXX) XXX-XXXX or XXX-XXX-XXXX
+/// Extracts 10 digits (or 11 starting with 1) and formats them.
+pub fn format_phone_us(s: &str) -> Option<String> {
+    let t = s.trim();
+    let lower = t.to_lowercase();
+    // Strip extension markers
+    let ext_markers = [" x", "x", " ext", "ext", "ext.", " extension"];
+    let main_str = ext_markers
+        .iter()
+        .filter_map(|m| lower.find(m).map(|pos| t[..pos].trim()))
+        .find(|s| !s.is_empty())
+        .unwrap_or(t);
+    
+    // Extract digits
+    let digits: String = main_str.chars().filter(|c| c.is_ascii_digit()).collect();
+    
+    if digits.is_empty() {
+        return None;
+    }
+    
+    // Handle 10 or 11 digit numbers
+    let ten_digits = if digits.len() == 10 {
+        digits.as_str()
+    } else if digits.len() == 11 && digits.starts_with('1') {
+        &digits[1..]
+    } else if digits.len() > 11 {
+        // Take first 11 digits, then extract 10
+        if digits.starts_with('1') && digits.len() >= 11 {
+            &digits[1..11]
+        } else if digits.len() >= 10 {
+            &digits[..10]
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    };
+    
+    if ten_digits.len() != 10 {
+        return None;
+    }
+    
+    // Format as (XXX) XXX-XXXX
+    Some(format!("({}) {}-{}", &ten_digits[..3], &ten_digits[3..6], &ten_digits[6..]))
+}
+
+/// US ZIP: pad with leading zeros to 5 digits (semantic: US ZIP must be 5 digits).
+pub fn pad_zip_leading_zeros(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let digits: String = t.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() || digits.len() > 5 {
+        return None;
+    }
+    Some(format!("{:0>5}", digits))
+}
+
+lazy_static::lazy_static! {
+    static ref US_STATE_ABBREV: std::collections::HashMap<&'static str, &'static str> = {
+        let mut m = std::collections::HashMap::new();
+        let pairs = [
+            ("AL", "Alabama"), ("AK", "Alaska"), ("AZ", "Arizona"), ("AR", "Arkansas"),
+            ("CA", "California"), ("CO", "Colorado"), ("CT", "Connecticut"), ("DE", "Delaware"),
+            ("FL", "Florida"), ("GA", "Georgia"), ("HI", "Hawaii"), ("ID", "Idaho"),
+            ("IL", "Illinois"), ("IN", "Indiana"), ("IA", "Iowa"), ("KS", "Kansas"),
+            ("KY", "Kentucky"), ("LA", "Louisiana"), ("ME", "Maine"), ("MD", "Maryland"),
+            ("MA", "Massachusetts"), ("MI", "Michigan"), ("MN", "Minnesota"), ("MS", "Mississippi"),
+            ("MO", "Missouri"), ("MT", "Montana"), ("NE", "Nebraska"), ("NV", "Nevada"),
+            ("NH", "New Hampshire"), ("NJ", "New Jersey"), ("NM", "New Mexico"), ("NY", "New York"),
+            ("NC", "North Carolina"), ("ND", "North Dakota"), ("OH", "Ohio"), ("OK", "Oklahoma"),
+            ("OR", "Oregon"), ("PA", "Pennsylvania"), ("RI", "Rhode Island"), ("SC", "South Carolina"),
+            ("SD", "South Dakota"), ("TN", "Tennessee"), ("TX", "Texas"), ("UT", "Utah"),
+            ("VT", "Vermont"), ("VA", "Virginia"), ("WA", "Washington"), ("WV", "West Virginia"),
+            ("WI", "Wisconsin"), ("WY", "Wyoming"), ("DC", "District of Columbia"),
+        ];
+        for (k, v) in pairs {
+            m.insert(k, v);
+        }
+        m
+    };
+}
+
+pub fn normalize_state_abbrev(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.len() != 2 {
+        return None;
+    }
+    let key = t.to_uppercase();
+    US_STATE_ABBREV.get(key.as_str()).map(|&v| v.to_string())
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -52,21 +272,137 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
     let mut email_space_count: usize = 0;
     let mut phone_digits_count: usize = 0;
     let mut phone_strip_count: usize = 0;
+    let mut phone_format_count: usize = 0;
     let mut date_count: usize = 0;
     let mut bool_count: usize = 0;
+    let mut bool_extended_count: usize = 0;
+    let mut date_cascade_count: usize = 0;
+    let mut ssn_count: usize = 0;
+    let mut ipv4_count: usize = 0;
+    let mut email_mask_count: usize = 0;
+    let mut cc_count: usize = 0;
+    let mut fuzzy_states_count: usize = 0;
+    let mut email_normalize_count: usize = 0;
+    let mut phone_e164_count: usize = 0;
+    let mut zip_pad_count: usize = 0;
+    let mut state_abbrev_count: usize = 0;
 
+    let col_name_lower = col_schema.name.to_lowercase();
+    let looks_like_zip = col_name_lower.contains("zip") || col_name_lower.contains("postal");
+    let us_states: Vec<String> = US_STATES.iter().map(|s| s.to_string()).collect();
     let mut trim_example_before = String::new();
     let mut trim_example_after = String::new();
+    let mut ssn_example_before = String::new();
+    let mut ipv4_example_before = String::new();
+    let mut email_mask_example_before = String::new();
+    let mut cc_example_before = String::new();
+    let mut fuzzy_example_before = String::new();
+    let mut fuzzy_example_after = String::new();
+    let mut email_norm_example_before = String::new();
+    let mut email_norm_example_after = String::new();
+    let mut phone_e164_example_before = String::new();
+    let mut phone_e164_example_after = String::new();
+    let mut zip_pad_example_before = String::new();
+    let mut zip_pad_example_after = String::new();
+    let mut state_abbrev_example_before = String::new();
+    let mut state_abbrev_example_after = String::new();
 
     for row_idx in 0..rows_to_scan {
         if invalid_values.len() >= MAX_UNIQUE_INVALID_SAMPLE {
             break;
         }
         if let Some(val) = df.get_cell(row_idx, col_idx) {
+            if !val.is_empty() {
+                if pii::is_ssn_like(&val) {
+                    ssn_count += 1;
+                    if ssn_example_before.is_empty() {
+                        ssn_example_before = val.clone();
+                    }
+                }
+                if pii::is_ipv4_like(&val) {
+                    ipv4_count += 1;
+                    if ipv4_example_before.is_empty() {
+                        ipv4_example_before = val.clone();
+                    }
+                }
+                if pii::is_email_like(&val) {
+                    email_mask_count += 1;
+                    if email_mask_example_before.is_empty() {
+                        email_mask_example_before = val.clone();
+                    }
+                }
+                if pii::looks_like_credit_card(&val) {
+                    cc_count += 1;
+                    if cc_example_before.is_empty() {
+                        cc_example_before = val.clone();
+                    }
+                }
+                if col_type == ColumnType::Text {
+                    if let Some(matched) = fuzzy_match_best(&val, &us_states, 2) {
+                        fuzzy_states_count += 1;
+                        if fuzzy_example_before.is_empty() {
+                            fuzzy_example_before = val.clone();
+                            fuzzy_example_after = matched;
+                        }
+                    }
+                    if let Some(full) = normalize_state_abbrev(&val) {
+                        state_abbrev_count += 1;
+                        if state_abbrev_example_before.is_empty() {
+                            state_abbrev_example_before = val.clone();
+                            state_abbrev_example_after = full;
+                        }
+                    }
+                }
+                if col_type == ColumnType::Email || pii::is_email_like(&val) {
+                    if let Some(norm) = pii::normalize_email(&val) {
+                        if norm != val {
+                            email_normalize_count += 1;
+                            if email_norm_example_before.is_empty() {
+                                email_norm_example_before = val.clone();
+                                email_norm_example_after = norm;
+                            }
+                        }
+                    }
+                }
+                if col_type == ColumnType::PhoneUS {
+                    if let Some(e164) = normalize_phone_e164(&val) {
+                        if e164 != val {
+                            phone_e164_count += 1;
+                            if phone_e164_example_before.is_empty() {
+                                phone_e164_example_before = val.clone();
+                                phone_e164_example_after = e164;
+                            }
+                        }
+                    }
+                }
+                if looks_like_zip {
+                    if let Some(padded) = pad_zip_leading_zeros(&val) {
+                        if padded != val.trim() {
+                            zip_pad_count += 1;
+                            if zip_pad_example_before.is_empty() {
+                                zip_pad_example_before = val.clone();
+                                zip_pad_example_after = padded;
+                            }
+                        }
+                    }
+                }
+            }
             if val.is_empty() || col_type.is_valid(&val) {
                 continue;
             }
             invalid_values.insert(val.clone());
+
+            if col_type == ColumnType::Boolean {
+                if normalize_boolean_extended(&val).is_some() {
+                    bool_extended_count += 1;
+                }
+            }
+            if col_type == ColumnType::Date {
+                let cascaded = parse_date_cascade(&val);
+                if !cascaded.is_empty() && cascaded != val.trim() {
+                    date_cascade_count += 1;
+                }
+            }
 
             let trimmed = val.trim();
             if !trimmed.is_empty() && trimmed != val && col_type.is_valid(trimmed) {
@@ -90,6 +426,12 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
                 let strip = normalize_phone_to_ten_digits(&val);
                 if strip != val && col_type.is_valid(&strip) {
                     phone_strip_count += 1;
+                }
+                // Check if formatting to US format would fix it
+                if let Some(formatted) = format_phone_us(&val) {
+                    if formatted != val && col_type.is_valid(&formatted) {
+                        phone_format_count += 1;
+                    }
                 }
             }
             if col_type == ColumnType::Date {
@@ -211,6 +553,8 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
         let mut digits_example_after = String::new();
         let mut strip_example_before = String::new();
         let mut strip_example_after = String::new();
+        let mut format_example_before = String::new();
+        let mut format_example_after = String::new();
         for val in &invalid_values {
             let after_d: String = val.chars().filter(|c| c.is_ascii_digit()).collect();
             if after_d != *val && col_type.is_valid(&after_d) {
@@ -224,6 +568,14 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
                 if strip_example_before.is_empty() {
                     strip_example_before = val.clone();
                     strip_example_after = after_s;
+                }
+            }
+            if let Some(formatted) = format_phone_us(val.as_str()) {
+                if formatted != *val && col_type.is_valid(&formatted) {
+                    if format_example_before.is_empty() {
+                        format_example_before = val.clone();
+                        format_example_after = formatted;
+                    }
                 }
             }
         }
@@ -243,6 +595,15 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
                 affected_rows_count: phone_strip_count,
                 example_before: strip_example_before,
                 example_after: strip_example_after,
+            });
+        }
+        if phone_format_count > 0 && !format_example_before.is_empty() {
+            suggestions.push(SuggestionReport {
+                suggestion: Suggestion::FormatPhoneUS,
+                description: format!("Format to US format ((XXX) XXX-XXXX) for {} phone numbers", phone_format_count),
+                affected_rows_count: phone_format_count,
+                example_before: format_example_before,
+                example_after: format_example_after,
             });
         }
     }
@@ -292,6 +653,136 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
                 example_after,
             });
         }
+    }
+
+    if bool_extended_count > 0 {
+        let mut example_before = String::new();
+        let mut example_after = String::new();
+        for val in &invalid_values {
+            if let Some(norm) = normalize_boolean_extended(val) {
+                example_before = val.clone();
+                example_after = norm.to_string();
+                break;
+            }
+        }
+        if !example_before.is_empty() {
+            suggestions.push(SuggestionReport {
+                suggestion: Suggestion::NormalizeBooleanExtended,
+                description: format!("Map yes/no/1/0/on/off to true/false in {} cells", bool_extended_count),
+                affected_rows_count: bool_extended_count,
+                example_before,
+                example_after,
+            });
+        }
+    }
+
+    if col_type == ColumnType::Date && date_cascade_count > 0 {
+        let mut example_before = String::new();
+        let mut example_after = String::new();
+        for val in &invalid_values {
+            let cascaded = parse_date_cascade(val);
+            if !cascaded.is_empty() && cascaded != val.trim() {
+                example_before = val.clone();
+                example_after = cascaded;
+                break;
+            }
+        }
+        if !example_before.is_empty() {
+            suggestions.push(SuggestionReport {
+                suggestion: Suggestion::NormalizeDateCascade,
+                description: format!("Parse multiple date formats → ISO (fallback 1970-01-01) for {} cells", date_cascade_count),
+                affected_rows_count: date_cascade_count,
+                example_before,
+                example_after,
+            });
+        }
+    }
+
+    if ssn_count > 0 && !ssn_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::RedactSSN,
+            description: format!("Redact SSN (XXX-XX-XXXX) in {} cells", ssn_count),
+            affected_rows_count: ssn_count,
+            example_before: ssn_example_before.clone(),
+            example_after: pii::redact_ssn(&ssn_example_before),
+        });
+    }
+    if ipv4_count > 0 && !ipv4_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::ZeroIPv4,
+            description: format!("Zero-out IPv4 (0.0.0.0) in {} cells", ipv4_count),
+            affected_rows_count: ipv4_count,
+            example_before: ipv4_example_before.clone(),
+            example_after: pii::zero_ipv4(&ipv4_example_before),
+        });
+    }
+    if email_mask_count > 0 && !email_mask_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::MaskEmail,
+            description: format!("Mask email (j***@domain.com) in {} cells", email_mask_count),
+            affected_rows_count: email_mask_count,
+            example_before: email_mask_example_before.clone(),
+            example_after: pii::mask_email(&email_mask_example_before),
+        });
+    }
+    if cc_count > 0 && !cc_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::RedactCreditCard,
+            description: format!("Redact credit card (****-****-****-1234) in {} cells", cc_count),
+            affected_rows_count: cc_count,
+            example_before: cc_example_before.clone(),
+            example_after: pii::redact_credit_card(&cc_example_before),
+        });
+    }
+
+    if col_type == ColumnType::Text && fuzzy_states_count > 0 && !fuzzy_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::FuzzyMatchCategorical {
+                master_list: us_states.clone(),
+                max_distance: 2,
+            },
+            description: format!("Fix typos (US States, distance ≤2) in {} cells", fuzzy_states_count),
+            affected_rows_count: fuzzy_states_count,
+            example_before: fuzzy_example_before.clone(),
+            example_after: fuzzy_example_after.clone(),
+        });
+    }
+
+    if email_normalize_count > 0 && !email_norm_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::NormalizeEmail,
+            description: format!("Normalize email (remove duplicate @, RFC-style) in {} cells", email_normalize_count),
+            affected_rows_count: email_normalize_count,
+            example_before: email_norm_example_before.clone(),
+            example_after: email_norm_example_after.clone(),
+        });
+    }
+    if col_type == ColumnType::PhoneUS && phone_e164_count > 0 && !phone_e164_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::NormalizePhoneE164,
+            description: format!("Normalize to E.164 (+1XXXXXXXXXX, strip extensions) in {} cells", phone_e164_count),
+            affected_rows_count: phone_e164_count,
+            example_before: phone_e164_example_before.clone(),
+            example_after: phone_e164_example_after.clone(),
+        });
+    }
+    if looks_like_zip && zip_pad_count > 0 && !zip_pad_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::PadZipLeadingZeros,
+            description: format!("Pad ZIP with leading zeros (5 digits) in {} cells", zip_pad_count),
+            affected_rows_count: zip_pad_count,
+            example_before: zip_pad_example_before.clone(),
+            example_after: zip_pad_example_after.clone(),
+        });
+    }
+    if col_type == ColumnType::Text && state_abbrev_count > 0 && !state_abbrev_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::NormalizeStateAbbrev,
+            description: format!("Normalize state abbreviations to full name in {} cells", state_abbrev_count),
+            affected_rows_count: state_abbrev_count,
+            example_before: state_abbrev_example_before.clone(),
+            example_after: state_abbrev_example_after.clone(),
+        });
     }
 
     suggestions
