@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 
 mod engine;
-use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}, mechanic, pii};
+use engine::{dataframe::DataFrame, parser::parse_csv, schema::{ColumnType, ColumnSchema}, mechanic, pii, bulk};
 
 // GLOBAL STATE (The "Database" in Memory)
 lazy_static! {
@@ -213,6 +213,43 @@ pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usiz
             }
         }
         Ok(fixed_count)
+    } else {
+        Err(JsValue::from_str("No dataset loaded"))
+    }
+}
+
+#[wasm_bindgen]
+pub fn apply_bulk_action(col_idx: usize, action_json: JsValue) -> Result<usize, JsValue> {
+    let action: bulk::BulkAction = serde_wasm_bindgen::from_value(action_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid bulk action: {}", e)))?;
+
+    // Compile regex once for RegexReplace to avoid O(rows) compilation and OOM
+    let compiled_regex = bulk::compile_regex_for_action(&action)
+        .map_err(|e| JsValue::from_str(&format!("Invalid regex: {}", e)))?;
+
+    let mut store = DATASET.lock().unwrap();
+    if let Some(df) = store.as_mut() {
+        if col_idx >= df.columns.len() {
+            return Err(JsValue::from_str("Column index out of bounds"));
+        }
+        let mut changed_count = 0;
+        for row_idx in 0..df.rows {
+            if let Some(old_val) = df.get_cell(row_idx, col_idx) {
+                match bulk::apply_to_cell(&old_val, &action, compiled_regex.as_ref()) {
+                    Ok(new_val) => {
+                        if new_val != old_val {
+                            df.patches
+                                .entry(row_idx)
+                                .or_insert_with(HashMap::new)
+                                .insert(col_idx, new_val);
+                            changed_count += 1;
+                        }
+                    }
+                    Err(e) => return Err(JsValue::from_str(&format!("Regex error: {}", e))),
+                }
+            }
+        }
+        Ok(changed_count)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
     }

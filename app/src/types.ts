@@ -68,4 +68,8 @@ export interface WorkspaceMeta {
     fileMetadata: FileMetadata;
     schemaSnapshot: Record<string, ColumnType>;
     triageLog: TriageLogEntry[];
+    /** Permanently rejected row indices (excluded from export / triage). */
+    rejectedRowIndices?: number[];
+    /** Placeholder for JS-composed primitive predicates (e.g. Equals, MatchesRegex). */
+    customRules?: unknown[];
 }

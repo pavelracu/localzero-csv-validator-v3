@@ -117,3 +117,17 @@ export async function updateSchemaSnapshot(
   };
   await putWorkspace(updated);
 }
+
+export async function setRejectedRows(
+  workspaceId: string,
+  indices: number[]
+): Promise<void> {
+  const ws = await getWorkspace(workspaceId);
+  if (!ws) return;
+  const updated: WorkspaceMeta = {
+    ...ws,
+    rejectedRowIndices: indices,
+    updatedAt: Date.now(),
+  };
+  await putWorkspace(updated);
+}

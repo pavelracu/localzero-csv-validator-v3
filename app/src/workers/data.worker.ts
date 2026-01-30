@@ -1,6 +1,6 @@
-import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion, update_schema, update_cell } from '../wasm/localzero_core';
+import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion, apply_bulk_action, update_schema, update_cell } from '../wasm/localzero_core';
 
-type WorkerMessage = 
+type WorkerMessage =
   | { type: 'INIT' }
   | { type: 'LOAD_FILE'; payload: Uint8Array }
   | { type: 'UPDATE_SCHEMA'; payload: any }
@@ -11,6 +11,7 @@ type WorkerMessage =
   | { type: 'APPLY_CORRECTION'; colIdx: number; strategy: string; id: string }
   | { type: 'GET_SUGGESTIONS'; colIdx: number; id: string }
   | { type: 'APPLY_SUGGESTION'; colIdx: number; suggestion: any; id: string }
+  | { type: 'APPLY_BULK_ACTION'; colIdx: number; action: any; id: string }
   | { type: 'UPDATE_CELL'; rowIdx: number; colIdx: number; value: string; id: string };
 
 let isWasmReady = false;
@@ -162,6 +163,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const { colIdx, suggestion, id } = e.data as any;
         const count = apply_suggestion(colIdx, suggestion);
         self.postMessage({ type: 'SUGGESTION_COMPLETE', id, payload: count });
+        break;
+      }
+      case 'APPLY_BULK_ACTION': {
+        const { colIdx, action, id } = e.data as any;
+        try {
+          const count = apply_bulk_action(colIdx, action);
+          self.postMessage({ type: 'BULK_ACTION_COMPLETE', id, payload: count });
+        } catch (err) {
+          self.postMessage({ type: 'ERROR', payload: { id, error: String(err) } });
+        }
         break;
       }
       case 'UPDATE_CELL': {
