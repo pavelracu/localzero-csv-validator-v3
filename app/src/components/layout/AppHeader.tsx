@@ -45,12 +45,7 @@ export const AppHeader = ({
             <h1 className="text-base font-bold text-foreground font-mono tracking-tight">
               LocalZero
             </h1>
-            <span className="text-sm text-muted-foreground font-sans font-normal hidden sm:inline">
-              {stage === 'SCHEMA' && 'Schema'}
-              {stage === 'INGESTION' && 'Ingestion'}
-              {stage === 'PROCESSING' && 'Validating'}
-              {stage === 'STUDIO' && 'Triage'}
-            </span>
+            
           </div>
         </div>
         <nav className="hidden md:flex items-center gap-1 text-xs font-mono" aria-label="Pipeline steps">
