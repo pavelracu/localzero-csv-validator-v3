@@ -154,26 +154,7 @@ export const Mapping: React.FC<MappingProps> = ({
                                 className="pl-8 h-9 text-sm"
                             />
                         </div>
-                        {(presets.length > 0) && (
-                            <Select
-                                onValueChange={(id) => {
-                                    const preset = presets.find(p => p.id === id);
-                                    if (preset) onLoadPreset(preset);
-                                }}
-                            >
-                                <SelectTrigger className="w-[180px] h-9 gap-2">
-                                    <FolderOpen size={14} className="shrink-0" />
-                                    <SelectValue placeholder="Load schema" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {presets.map((preset) => (
-                                        <SelectItem key={preset.id} value={preset.id}>
-                                            {preset.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        )}
+                        
                         <Button
                             variant="outline"
                             size="sm"
