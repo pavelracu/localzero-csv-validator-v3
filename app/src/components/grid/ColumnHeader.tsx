@@ -13,7 +13,7 @@ interface ColumnHeaderProps {
     onSelectFix: () => void;
 }
 
-const TYPES: ColumnType[] = ['Text', 'Integer', 'Float', 'Boolean', 'Email', 'PhoneUS', 'Date'];
+const TYPES: ColumnType[] = ['Text', 'Integer', 'Float', 'Boolean', 'Email', 'PhoneUS', 'Date', 'Uuid', 'Time', 'Currency', 'Percentage'];
 
 export const ColumnHeader: React.FC<ColumnHeaderProps> = ({ 
     name, 

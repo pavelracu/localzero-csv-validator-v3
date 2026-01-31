@@ -29,10 +29,14 @@ const TYPE_ICONS: Record<ColumnType, React.ReactNode> = {
     'Boolean': <ToggleLeft size={14} />,
     'Date': <Calendar size={14} />,
     'Email': <Mail size={14} />,
-    'PhoneUS': <Phone size={14} />
+    'PhoneUS': <Phone size={14} />,
+    'Uuid': <Hash size={14} />,
+    'Time': <Calendar size={14} />,
+    'Currency': <Hash size={14} />,
+    'Percentage': <Hash size={14} />,
 };
 
-const TYPES: ColumnType[] = ['Text', 'Integer', 'Float', 'Boolean', 'Email', 'PhoneUS', 'Date'];
+const TYPES: ColumnType[] = ['Text', 'Integer', 'Float', 'Boolean', 'Email', 'PhoneUS', 'Date', 'Uuid', 'Time', 'Currency', 'Percentage'];
 
 export const Mapping: React.FC<MappingProps> = ({
     schema,

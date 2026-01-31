@@ -29,6 +29,11 @@ pub enum Suggestion {
     FormatPhoneUS,       // Format to US format: (XXX) XXX-XXXX or XXX-XXX-XXXX
     PadZipLeadingZeros,  // US ZIP: pad to 5 digits
     NormalizeStateAbbrev, // US state abbreviation -> full name
+    // New standard types (Excel/Sheets-style)
+    NormalizeUuid,       // 32 hex -> 8-4-4-4-12 lowercase; hyphenated -> lowercase
+    NormalizeTimeToIso,  // HH:MM or 12h -> HH:MM:SS 24h
+    NormalizeCurrency,   // Strip $€£,, format to 2 decimals
+    NormalizePercentage, // Parse and format as "50" or "50%"
 }
 
 /// Boolean extended: true,t,yes,y,1,on,enabled -> true; false,f,no,n,0,off,disabled -> false (case insensitive).
@@ -57,6 +62,79 @@ pub fn parse_date_cascade(s: &str) -> String {
         }
     }
     "1970-01-01".to_string()
+}
+
+/// UUID: 32 hex -> 8-4-4-4-12 lowercase; 36 with hyphens -> lowercase.
+pub fn normalize_uuid(s: &str) -> String {
+    let s = s.trim();
+    if s.is_empty() {
+        return String::new();
+    }
+    let hex: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    if hex.len() == 32 {
+        let lower = hex.to_lowercase();
+        format!(
+            "{}-{}-{}-{}-{}",
+            &lower[0..8],
+            &lower[8..12],
+            &lower[12..16],
+            &lower[16..20],
+            &lower[20..32]
+        )
+    } else if s.len() == 36 && s.as_bytes()[8] == b'-' && s.as_bytes()[13] == b'-' && s.as_bytes()[18] == b'-' && s.as_bytes()[23] == b'-' {
+        s.to_lowercase()
+    } else {
+        s.to_string()
+    }
+}
+
+/// Time: parse HH:MM, HH:MM:SS, 12h AM/PM -> HH:MM:SS 24h.
+pub fn normalize_time_to_iso(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Some(String::new());
+    }
+    const FORMATS: &[&str] = &["%H:%M", "%H:%M:%S", "%I:%M %p", "%I:%M:%S %p"];
+    for fmt in FORMATS {
+        if let Ok(t) = chrono::NaiveTime::parse_from_str(s, fmt) {
+            return Some(t.format("%H:%M:%S").to_string());
+        }
+    }
+    None
+}
+
+/// Currency: strip $€£, and spaces; parse and format to 2 decimals.
+pub fn normalize_currency(s: &str) -> String {
+    let stripped: String = s
+        .chars()
+        .filter(|c| !matches!(c, '$' | '€' | '£' | '¥' | ',' | ' '))
+        .collect();
+    let trimmed = stripped.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if let Ok(n) = trimmed.parse::<f64>() {
+        format!("{:.2}", n)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Percentage: strip %; parse and format as "50" (0-100) or "50%" per policy. We use "50" for consistency.
+pub fn normalize_percentage(s: &str) -> String {
+    let s = s.trim().trim_end_matches('%').trim();
+    if s.is_empty() {
+        return String::new();
+    }
+    if let Ok(n) = s.parse::<f64>() {
+        if (0.0..=1.0).contains(&n) {
+            format!("{}", (n * 100.0).round())
+        } else {
+            format!("{}", n.round())
+        }
+    } else {
+        s.to_string()
+    }
 }
 
 /// Levenshtein distance between two strings.
@@ -286,6 +364,10 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
     let mut phone_e164_count: usize = 0;
     let mut zip_pad_count: usize = 0;
     let mut state_abbrev_count: usize = 0;
+    let mut uuid_normalize_count: usize = 0;
+    let mut time_normalize_count: usize = 0;
+    let mut currency_normalize_count: usize = 0;
+    let mut percentage_normalize_count: usize = 0;
 
     let col_name_lower = col_schema.name.to_lowercase();
     let looks_like_zip = col_name_lower.contains("zip") || col_name_lower.contains("postal");
@@ -306,6 +388,14 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
     let mut zip_pad_example_after = String::new();
     let mut state_abbrev_example_before = String::new();
     let mut state_abbrev_example_after = String::new();
+    let mut uuid_example_before = String::new();
+    let mut uuid_example_after = String::new();
+    let mut time_example_before = String::new();
+    let mut time_example_after = String::new();
+    let mut currency_example_before = String::new();
+    let mut currency_example_after = String::new();
+    let mut percentage_example_before = String::new();
+    let mut percentage_example_after = String::new();
 
     for row_idx in 0..rows_to_scan {
         if invalid_values.len() >= MAX_UNIQUE_INVALID_SAMPLE {
@@ -446,6 +536,47 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
                 let lower = trimmed.to_lowercase();
                 if (lower == "true" || lower == "false") && lower != trimmed {
                     bool_count += 1;
+                }
+            }
+            if col_type == ColumnType::Uuid {
+                let norm = normalize_uuid(&val);
+                if norm != val && col_type.is_valid(&norm) {
+                    uuid_normalize_count += 1;
+                    if uuid_example_before.is_empty() {
+                        uuid_example_before = val.clone();
+                        uuid_example_after = norm;
+                    }
+                }
+            }
+            if col_type == ColumnType::Time {
+                if let Some(norm) = normalize_time_to_iso(&val) {
+                    if norm != val.trim() && col_type.is_valid(&norm) {
+                        time_normalize_count += 1;
+                        if time_example_before.is_empty() {
+                            time_example_before = val.clone();
+                            time_example_after = norm;
+                        }
+                    }
+                }
+            }
+            if col_type == ColumnType::Currency {
+                let norm = normalize_currency(&val);
+                if norm != val.trim() && col_type.is_valid(&norm) {
+                    currency_normalize_count += 1;
+                    if currency_example_before.is_empty() {
+                        currency_example_before = val.clone();
+                        currency_example_after = norm;
+                    }
+                }
+            }
+            if col_type == ColumnType::Percentage {
+                let norm = normalize_percentage(&val);
+                if norm != val.trim() && col_type.is_valid(&norm) {
+                    percentage_normalize_count += 1;
+                    if percentage_example_before.is_empty() {
+                        percentage_example_before = val.clone();
+                        percentage_example_after = norm;
+                    }
                 }
             }
         }
@@ -782,6 +913,43 @@ pub fn analyze_column(df: &DataFrame, col_idx: usize) -> Vec<SuggestionReport> {
             affected_rows_count: state_abbrev_count,
             example_before: state_abbrev_example_before.clone(),
             example_after: state_abbrev_example_after.clone(),
+        });
+    }
+
+    if col_type == ColumnType::Uuid && uuid_normalize_count > 0 && !uuid_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::NormalizeUuid,
+            description: format!("Normalize UUID (lowercase, add hyphens if 32 hex) in {} cells", uuid_normalize_count),
+            affected_rows_count: uuid_normalize_count,
+            example_before: uuid_example_before.clone(),
+            example_after: uuid_example_after.clone(),
+        });
+    }
+    if col_type == ColumnType::Time && time_normalize_count > 0 && !time_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::NormalizeTimeToIso,
+            description: format!("Normalize time to HH:MM:SS in {} cells", time_normalize_count),
+            affected_rows_count: time_normalize_count,
+            example_before: time_example_before.clone(),
+            example_after: time_example_after.clone(),
+        });
+    }
+    if col_type == ColumnType::Currency && currency_normalize_count > 0 && !currency_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::NormalizeCurrency,
+            description: format!("Normalize currency (strip symbols, 2 decimals) in {} cells", currency_normalize_count),
+            affected_rows_count: currency_normalize_count,
+            example_before: currency_example_before.clone(),
+            example_after: currency_example_after.clone(),
+        });
+    }
+    if col_type == ColumnType::Percentage && percentage_normalize_count > 0 && !percentage_example_before.is_empty() {
+        suggestions.push(SuggestionReport {
+            suggestion: Suggestion::NormalizePercentage,
+            description: format!("Normalize percentage in {} cells", percentage_normalize_count),
+            affected_rows_count: percentage_normalize_count,
+            example_before: percentage_example_before.clone(),
+            example_after: percentage_example_after.clone(),
         });
     }
 

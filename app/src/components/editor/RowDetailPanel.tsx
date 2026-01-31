@@ -44,6 +44,14 @@ function getErrorMessage(value: string, columnType: ColumnType): string {
             return `"${value}" is not a valid US phone number. Expected format: (XXX) XXX-XXXX or XXX-XXX-XXXX. Area code must start with 2-9 and have middle digit 0-8.`;
         case 'Date':
             return `"${value}" is not a valid date. Expected formats: YYYY-MM-DD, MM/DD/YYYY, DD-MM-YYYY, or YYYY/MM/DD`;
+        case 'Uuid':
+            return `"${value}" is not a valid UUID. Expected format: 550e8400-e29b-41d4-a716-446655440000 (with or without hyphens).`;
+        case 'Time':
+            return `"${value}" is not a valid time. Expected HH:MM or HH:MM:SS (24h or 12h with AM/PM).`;
+        case 'Currency':
+            return `"${value}" is not a valid currency value. Expected a number, optionally with $, €, or commas.`;
+        case 'Percentage':
+            return `"${value}" is not a valid percentage. Expected a number, optionally with %.`;
         case 'Text':
         default:
             return 'Invalid value';

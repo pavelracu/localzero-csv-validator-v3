@@ -82,19 +82,19 @@ export const FixPanel: React.FC<FixPanelProps> = ({
     const [findReplaceCount, setFindReplaceCount] = useState<number | null>(null);
     const [isReplacing, setIsReplacing] = useState(false);
     const previousErrorCountRef = useRef<number>(errorCount);
+    const onGetSuggestionsRef = useRef(onGetSuggestions);
+    onGetSuggestionsRef.current = onGetSuggestions;
 
     const refreshSuggestions = React.useCallback(() => {
-        if (open) {
-            setIsLoading(true);
-            onGetSuggestions()
-                .then(setSuggestions)
-                .catch((err) => {
-                    console.error('Failed to refresh suggestions:', err);
-                    setSuggestions([]);
-                })
-                .finally(() => setIsLoading(false));
-        }
-    }, [open, onGetSuggestions]);
+        setIsLoading(true);
+        onGetSuggestionsRef.current()
+            .then(setSuggestions)
+            .catch((err) => {
+                console.error('Failed to refresh suggestions:', err);
+                setSuggestions([]);
+            })
+            .finally(() => setIsLoading(false));
+    }, []);
 
     useEffect(() => {
         if (open) {
@@ -106,16 +106,15 @@ export const FixPanel: React.FC<FixPanelProps> = ({
         }
     }, [open, refreshSuggestions]);
 
-    // Refresh suggestions when errorCount changes significantly (indicates data state changed)
+    // Refresh suggestions when errorCount changes (e.g. after apply fix or validation)
     useEffect(() => {
-        if (open && errorCount !== previousErrorCountRef.current) {
-            // Small delay to allow validation to complete
-            const timeoutId = setTimeout(() => {
-                refreshSuggestions();
-                previousErrorCountRef.current = errorCount;
-            }, 300);
-            return () => clearTimeout(timeoutId);
-        }
+        if (!open) return;
+        if (errorCount === previousErrorCountRef.current) return;
+        const timeoutId = setTimeout(() => {
+            refreshSuggestions();
+            previousErrorCountRef.current = errorCount;
+        }, 300);
+        return () => clearTimeout(timeoutId);
     }, [errorCount, open, refreshSuggestions]);
 
     const handleApply = async (suggestion: Suggestion, index: number) => {

@@ -38,7 +38,7 @@ pub fn load_dataset(data: &[u8]) -> Result<JsValue, JsValue> {
 
     // 1. Parse and Infer
     time("Rust: parse_csv");
-    match parse_csv(data) {
+    match parse_csv(data, Some(|_, _| {})) {
         Ok(df) => {
             timeEnd("Rust: parse_csv");
             let summary = DatasetSummary {
@@ -54,6 +54,38 @@ pub fn load_dataset(data: &[u8]) -> Result<JsValue, JsValue> {
             // 3. Return Summary to JS
             Ok(serde_wasm_bindgen::to_value(&summary)?)
         },
+        Err(e) => {
+            timeEnd("Rust: parse_csv");
+            Err(JsValue::from_str(&format!("Parse error: {}", e)))
+        }
+    }
+}
+
+/// Load and parse CSV, calling `progress_fn(bytes_processed, total_bytes)` during the byte scan.
+/// Use this to drive a progress bar. Progress is reported every ~64KB.
+#[wasm_bindgen]
+pub fn load_dataset_with_progress(data: &[u8], progress_fn: &js_sys::Function) -> Result<JsValue, JsValue> {
+    log(&format!("🚀 Parsing {} bytes (with progress)...", data.len()));
+    time("Rust: parse_csv");
+    let mut progress_cb = |bytes: usize, total: usize| {
+        let _ = progress_fn.call2(
+            &JsValue::NULL,
+            &JsValue::from(bytes as f64),
+            &JsValue::from(total as f64),
+        );
+    };
+    match parse_csv(data, Some(&mut progress_cb)) {
+        Ok(df) => {
+            timeEnd("Rust: parse_csv");
+            let summary = DatasetSummary {
+                row_count: df.rows,
+                columns: df.columns.clone(),
+                file_size_mb: data.len() as f64 / 1_048_576.0,
+            };
+            let mut store = DATASET.lock().unwrap();
+            *store = Some(df);
+            Ok(serde_wasm_bindgen::to_value(&summary)?)
+        }
         Err(e) => {
             timeEnd("Rust: parse_csv");
             Err(JsValue::from_str(&format!("Parse error: {}", e)))
@@ -184,6 +216,13 @@ pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usiz
                         mechanic::normalize_state_abbrev(&old_val).unwrap_or_else(|| old_val.clone()),
                         false,
                     ),
+                    mechanic::Suggestion::NormalizeUuid => (mechanic::normalize_uuid(&old_val), false),
+                    mechanic::Suggestion::NormalizeTimeToIso => (
+                        mechanic::normalize_time_to_iso(&old_val).unwrap_or_else(|| old_val.clone()),
+                        false,
+                    ),
+                    mechanic::Suggestion::NormalizeCurrency => (mechanic::normalize_currency(&old_val), false),
+                    mechanic::Suggestion::NormalizePercentage => (mechanic::normalize_percentage(&old_val), false),
                 };
 
                 let should_apply = if is_redaction {
@@ -202,6 +241,10 @@ pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usiz
                         | mechanic::Suggestion::NormalizePhoneE164
                         | mechanic::Suggestion::PadZipLeadingZeros
                         | mechanic::Suggestion::NormalizeStateAbbrev
+                        | mechanic::Suggestion::NormalizeUuid
+                        | mechanic::Suggestion::NormalizeTimeToIso
+                        | mechanic::Suggestion::NormalizeCurrency
+                        | mechanic::Suggestion::NormalizePercentage
                 ) {
                     new_val != old_val
                 } else {
@@ -336,6 +379,10 @@ pub fn validate_column(col_idx: usize, type_name: &str) -> Result<Vec<usize>, Js
             "Email" => ColumnType::Email,
             "PhoneUS" => ColumnType::PhoneUS,
             "Date" => ColumnType::Date,
+            "Uuid" => ColumnType::Uuid,
+            "Time" => ColumnType::Time,
+            "Currency" => ColumnType::Currency,
+            "Percentage" => ColumnType::Percentage,
             _ => return Err(JsValue::from_str(&format!("Unknown type: {}", type_name))),
         };
 

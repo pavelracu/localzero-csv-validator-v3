@@ -13,6 +13,12 @@ import { SchemaPreset, type ColumnType, type Suggestion } from './types';
 import { CUSTOM_SCHEMA_ID, getSchemaById } from './lib/schemas';
 import type { SchemaDefinition } from './lib/schemas';
 
+function formatProgressCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 function App() {
   const {
     setActiveWorkspace,
@@ -31,6 +37,8 @@ function App() {
     errors,
     pendingValidation,
     isLoadingFile,
+    loadProgress,
+    currentProcess,
     dataVersion,
     goToIngestion,
     loadFile,
@@ -251,6 +259,7 @@ function App() {
             onFileSelect={handleFileSelect}
             isReady={isReady}
             isLoadingFile={isLoadingFile}
+            loadProgress={loadProgress}
           />
         )}
 
@@ -286,14 +295,45 @@ function App() {
         )}
 
         {stage === 'PROCESSING' && (
-          <div className="h-full flex flex-col items-center justify-center">
-            <Loader2 className="animate-spin text-primary mb-2" />
-            <p className="text-lg font-medium mb-1">
-              Validating {rowCount.toLocaleString()} rows...
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Validation runs locally — no data is uploaded.
-            </p>
+          <div className="h-full flex flex-col items-center justify-center gap-6 px-6">
+            <Loader2 className="h-10 w-10 animate-spin text-primary shrink-0" aria-hidden />
+            <div className="text-center space-y-2">
+              <p className="text-lg font-medium text-foreground">
+                {currentProcess?.label ?? 'Validating…'}
+              </p>
+              {currentProcess && (currentProcess.rowsProcessed != null || currentProcess.rowsPerSec != null) && (
+                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-muted-foreground tabular-nums">
+                  {currentProcess.totalRows != null && currentProcess.rowsProcessed != null && (
+                    <span>
+                      {formatProgressCount(currentProcess.rowsProcessed)} / {formatProgressCount(currentProcess.totalRows)} rows
+                    </span>
+                  )}
+                  {currentProcess.rowsPerSec != null && currentProcess.rowsPerSec > 0 && (
+                    <span>{formatProgressCount(currentProcess.rowsPerSec)} rows/s</span>
+                  )}
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Validation runs locally — no data is uploaded.
+              </p>
+            </div>
+            {currentProcess?.totalRows != null && currentProcess.totalRows > 0 && (currentProcess.rowsProcessed ?? 0) >= 0 && (
+              <div
+                className="w-full max-w-md h-2 rounded-full bg-muted overflow-hidden"
+                role="progressbar"
+                aria-valuenow={Math.min(100, Math.round(((currentProcess.rowsProcessed ?? 0) / currentProcess.totalRows) * 100))}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Validation progress"
+              >
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
+                  style={{
+                    width: `${Math.min(100, ((currentProcess.rowsProcessed ?? 0) / currentProcess.totalRows) * 100)}%`,
+                  }}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

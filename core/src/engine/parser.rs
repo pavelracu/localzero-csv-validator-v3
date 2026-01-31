@@ -3,8 +3,13 @@ use crate::engine::schema::{ColumnType, ColumnSchema};
 use std::io::Cursor;
 use csv::ReaderBuilder;
 
-/// Parse raw bytes into a DataFrame and infer types using a lazy scan approach
-pub fn parse_csv(data: &[u8]) -> Result<DataFrame, Box<dyn std::error::Error>> {
+/// Progress report: call every PROGRESS_INTERVAL bytes during byte scan.
+/// Larger interval = fewer JS callbacks and less parse overhead (WASM↔JS is costly).
+const PROGRESS_INTERVAL: usize = 1_048_576; // 1MB
+
+/// Parse raw bytes into a DataFrame and infer types using a lazy scan approach.
+/// If `progress` is Some, it is called during the byte scan with (bytes_scanned, total_bytes).
+pub fn parse_csv<F: FnMut(usize, usize)>(data: &[u8], mut progress: Option<F>) -> Result<DataFrame, Box<dyn std::error::Error>> {
     // 1. Extract Headers (Parse first line)
     let cursor = Cursor::new(data);
     let mut rdr = ReaderBuilder::new()
@@ -30,9 +35,9 @@ pub fn parse_csv(data: &[u8]) -> Result<DataFrame, Box<dyn std::error::Error>> {
     
     let mut row_indices = Vec::new();
     let mut current_pos = 0;
-    
+    let total = data.len();
+
     // Find end of header
-    // Assuming \n or \r\n.
     while current_pos < data.len() {
         if data[current_pos] == b'\n' {
             current_pos += 1;
@@ -40,6 +45,10 @@ pub fn parse_csv(data: &[u8]) -> Result<DataFrame, Box<dyn std::error::Error>> {
         }
         current_pos += 1;
     }
+    if let Some(ref mut p) = progress {
+        p(current_pos, total);
+    }
+    let mut last_progress_at = current_pos;
     
     // current_pos is now at the start of the first data row
     if current_pos < data.len() {
@@ -55,6 +64,15 @@ pub fn parse_csv(data: &[u8]) -> Result<DataFrame, Box<dyn std::error::Error>> {
             }
         }
         current_pos += 1;
+        if let Some(ref mut p) = progress {
+            if current_pos.saturating_sub(last_progress_at) >= PROGRESS_INTERVAL {
+                p(current_pos, total);
+                last_progress_at = current_pos;
+            }
+        }
+    }
+    if let Some(ref mut p) = progress {
+        p(total, total);
     }
 
     // 3. Create DataFrame
@@ -88,9 +106,13 @@ fn infer_column_type(sample: &[String]) -> ColumnType {
         ColumnType::Boolean,
         ColumnType::Integer,
         ColumnType::Float,
+        ColumnType::Uuid,
+        ColumnType::Time,
         ColumnType::Date,
         ColumnType::Email,
         ColumnType::PhoneUS,
+        ColumnType::Currency,
+        ColumnType::Percentage,
     ];
 
     let non_empty_count = sample.iter().filter(|v| !v.trim().is_empty()).count();

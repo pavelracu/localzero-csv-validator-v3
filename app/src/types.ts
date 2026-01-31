@@ -1,4 +1,4 @@
-export type ColumnType = 'Text' | 'Integer' | 'Float' | 'Boolean' | 'Email' | 'PhoneUS' | 'Date';
+export type ColumnType = 'Text' | 'Integer' | 'Float' | 'Boolean' | 'Email' | 'PhoneUS' | 'Date' | 'Uuid' | 'Time' | 'Currency' | 'Percentage';
 
 export interface ColumnSchema {
     name: string;
@@ -29,7 +29,11 @@ export type Suggestion =
     | { NormalizePhoneE164: null }
     | { FormatPhoneUS: null }
     | { PadZipLeadingZeros: null }
-    | { NormalizeStateAbbrev: null };
+    | { NormalizeStateAbbrev: null }
+    | 'NormalizeUuid'
+    | 'NormalizeTimeToIso'
+    | 'NormalizeCurrency'
+    | 'NormalizePercentage';
 
 export interface SuggestionReport {
     suggestion: Suggestion;
@@ -37,6 +41,35 @@ export interface SuggestionReport {
     affected_rows_count: number;
     example_before: string;
     example_after: string;
+}
+
+// --- Current process (validate & fix phase: loading, validating, applying fix, etc.) ---
+
+export type ProcessPhase =
+  | 'idle'
+  | 'loading_file'
+  | 'validating'
+  | 'applying_fix'
+  | 'find_replace'
+  | 'analyzing_column'
+  | 'validating_column';
+
+export interface CurrentProcess {
+  phase: ProcessPhase;
+  /** User-visible label, e.g. "Validating…", "Applying fix to Email (Work)…" */
+  label: string;
+  /** Rows processed so far (for validating, find_replace, applying_fix) */
+  rowsProcessed?: number;
+  /** Total rows (when known) */
+  totalRows?: number;
+  /** Throughput: rows per second (computed in worker or main) */
+  rowsPerSec?: number;
+  /** For find_replace: total cells replaced so far */
+  cellsReplaced?: number;
+  /** Optional detail: file name, column name, etc. */
+  detail?: string;
+  /** When process started (ms); optional for ETA */
+  startedAt?: number;
 }
 
 export interface SchemaPreset {

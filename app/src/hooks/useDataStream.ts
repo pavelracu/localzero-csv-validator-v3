@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ColumnSchema, ColumnType, DatasetSummary, Suggestion, SuggestionReport } from '../types';
+import { ColumnSchema, ColumnType, CurrentProcess, DatasetSummary, Suggestion, SuggestionReport } from '../types';
 import DataWorker from '../workers/data.worker?worker';
 
 export type AppStage = 'SCHEMA' | 'INGESTION' | 'PROCESSING' | 'STUDIO';
@@ -15,8 +15,12 @@ export interface UseDataStreamReturn {
     pendingValidation: Set<number>;
     /** True while a file is being loaded (parsed locally). No data is uploaded. */
     isLoadingFile: boolean;
+    /** During load: { bytesProcessed, totalBytes } from Rust parser; null when not loading or when complete. */
+    loadProgress: { bytesProcessed: number; totalBytes: number } | null;
     /** Bumps when row data is invalidated (e.g. after apply fix). Table uses this to refetch visible rows. */
     dataVersion: number;
+    /** Current long-running process (validating, applying fix, find/replace, etc.); null when idle. */
+    currentProcess: CurrentProcess | null;
     loadFile: (file: File) => Promise<void>;
     fetchRows: (start: number, limit: number) => Promise<Record<number, string[]>>;
     updateColumnType: (colIdx: number, newType: ColumnType) => Promise<void>;
@@ -39,7 +43,9 @@ export function useDataStream(): UseDataStreamReturn {
     const [errors, setErrors] = useState<Map<number, Set<number>>>(new Map());
     const [pendingValidation, setPendingValidation] = useState<Set<number>>(new Set());
     const [isLoadingFile, setIsLoadingFile] = useState(false);
+    const [loadProgress, setLoadProgress] = useState<{ bytesProcessed: number; totalBytes: number } | null>(null);
     const [dataVersion, setDataVersion] = useState(0);
+    const [currentProcess, setCurrentProcess] = useState<CurrentProcess | null>(null);
 
     const workerRef = useRef<Worker | null>(null);
     const pendingRequests = useRef<Map<string, { resolve: (data: any) => void; reject: (err: any) => void }>>(new Map());
@@ -65,11 +71,33 @@ export function useDataStream(): UseDataStreamReturn {
                 type === 'UPDATE_CELL_COMPLETE' ||
                 type === 'FIND_REPLACE_ALL_COMPLETE'
             ) {
+                if (type === 'CORRECTION_COMPLETE' || type === 'SUGGESTION_COMPLETE' || type === 'GET_SUGGESTIONS_COMPLETE' || type === 'FIND_REPLACE_ALL_COMPLETE') {
+                    setCurrentProcess(null);
+                }
                 const request = pendingRequests.current.get(id);
                 if (request) {
                     request.resolve(payload);
                     pendingRequests.current.delete(id);
                 }
+            } else if (type === 'VALIDATION_PROGRESS') {
+                const { rowsProcessed, totalRows, rowsPerSec } = payload ?? {};
+                setCurrentProcess({
+                    phase: 'validating',
+                    label: 'Validating…',
+                    rowsProcessed,
+                    totalRows,
+                    rowsPerSec,
+                });
+            } else if (type === 'FIND_REPLACE_PROGRESS') {
+                const { rowsProcessed, totalRows, cellsReplaced, rowsPerSec } = payload ?? {};
+                setCurrentProcess({
+                    phase: 'find_replace',
+                    label: 'Find & replace…',
+                    rowsProcessed,
+                    totalRows,
+                    cellsReplaced,
+                    rowsPerSec,
+                });
             } else if (type === 'VALIDATION_UPDATE') {
                 setErrors(prev => {
                     const next = new Map(prev);
@@ -99,11 +127,13 @@ export function useDataStream(): UseDataStreamReturn {
                     return next;
                 });
             } else if (type === 'VALIDATION_COMPLETE') {
+                setCurrentProcess(null);
                 setStage('STUDIO');
             } else if (type === 'ERROR') {
                 console.error("Worker Error:", payload);
                 const errId = payload?.id;
                 if (errId != null) {
+                    setCurrentProcess(null);
                     const request = pendingRequests.current.get(errId);
                     if (request) {
                         request.reject(new Error(payload?.error ?? String(payload)));
@@ -181,6 +211,7 @@ export function useDataStream(): UseDataStreamReturn {
         setErrors(new Map());
         rowCache.current.clear();
         setPendingValidation(new Set());
+        setCurrentProcess({ phase: 'loading_file', label: 'Loading file…', detail: file.name });
 
         try {
             const buffer = await file.arrayBuffer();
@@ -190,24 +221,33 @@ export function useDataStream(): UseDataStreamReturn {
             await new Promise<void>((resolve, reject) => {
                 const worker = workerRef.current!;
                 const handleLoad = (e: MessageEvent) => {
-                    if (e.data.type === 'LOAD_COMPLETE') {
+                    if (e.data.type === 'LOAD_PROGRESS') {
+                        setLoadProgress(e.data.payload as { bytesProcessed: number; totalBytes: number });
+                    } else if (e.data.type === 'LOAD_COMPLETE') {
+                        setLoadProgress(null);
+                        setCurrentProcess(null);
                         const summary = e.data.payload as DatasetSummary;
                         setSchema(summary.schema);
                         setRowCount(summary.row_count);
                         worker.removeEventListener('message', handleLoad);
                         resolve();
                     } else if (e.data.type === 'ERROR') {
+                        setLoadProgress(null);
+                        setCurrentProcess(null);
                         worker.removeEventListener('message', handleLoad);
                         reject(e.data.payload);
                     }
                 };
                 worker.addEventListener('message', handleLoad);
+                setLoadProgress({ bytesProcessed: 0, totalBytes: bytes.length });
                 worker.postMessage({ type: 'LOAD_FILE', payload: bytes }, [bytes.buffer]);
             });
 
             // Stay in INGESTION; UI shows mapping when rowCount > 0
         } finally {
             setIsLoadingFile(false);
+            setLoadProgress(null);
+            setCurrentProcess(null);
         }
     }, []);
 
@@ -293,15 +333,17 @@ export function useDataStream(): UseDataStreamReturn {
         setStage('PROCESSING');
         setInitialSchema(JSON.parse(JSON.stringify(schema)));
         setErrors(new Map());
-        
+        setCurrentProcess({ phase: 'validating', label: 'Validating…', totalRows: rowCount, rowsProcessed: 0 });
         if (workerRef.current) {
             workerRef.current.postMessage({ type: 'UPDATE_SCHEMA', payload: schema });
             workerRef.current.postMessage({ type: 'START_VALIDATION' });
         }
-    }, [schema]);
+    }, [schema, rowCount]);
 
     const applyCorrection = useCallback(async (colIdx: number, strategy: string) => {
          if (!workerRef.current) return;
+         const colName = schema[colIdx]?.name ?? `Column ${colIdx + 1}`;
+         setCurrentProcess({ phase: 'applying_fix', label: 'Applying fix…', detail: colName });
 
          const requestId = `fix_${colIdx}_${Date.now()}`;
          try {
@@ -326,6 +368,8 @@ export function useDataStream(): UseDataStreamReturn {
 
     const getSuggestions = useCallback(async (colIdx: number): Promise<SuggestionReport[]> => {
         if (!workerRef.current) return [];
+        const colName = schema[colIdx]?.name ?? `Column ${colIdx + 1}`;
+        setCurrentProcess({ phase: 'analyzing_column', label: 'Analyzing column…', detail: colName });
 
         const requestId = `getsuggest_${colIdx}_${Date.now()}`;
         console.log('[useDataStream] getSuggestions colIdx=', colIdx, 'requestId=', requestId);
@@ -339,11 +383,15 @@ export function useDataStream(): UseDataStreamReturn {
         } catch (e) {
             console.error("[useDataStream] getSuggestions failed", e);
             return [];
+        } finally {
+            setCurrentProcess(null);
         }
-    }, []);
+    }, [schema]);
 
     const applySuggestion = useCallback(async (colIdx: number, suggestion: Suggestion) => {
         if (!workerRef.current) return;
+        const colName = schema[colIdx]?.name ?? `Column ${colIdx + 1}`;
+        setCurrentProcess({ phase: 'applying_fix', label: 'Applying fix…', detail: colName });
 
         const requestId = `applysuggest_${colIdx}_${Date.now()}`;
         try {
@@ -391,6 +439,7 @@ export function useDataStream(): UseDataStreamReturn {
 
     const findReplaceAll = useCallback(async (find: string, replace: string): Promise<number> => {
         if (!workerRef.current) return 0;
+        setCurrentProcess({ phase: 'find_replace', label: 'Find & replace…', totalRows: rowCount, rowsProcessed: 0, cellsReplaced: 0 });
         const requestId = `findreplace_${Date.now()}`;
         const t0 = performance.now();
         const count = await new Promise<number>((resolve, reject) => {
@@ -407,7 +456,7 @@ export function useDataStream(): UseDataStreamReturn {
         rowCache.current.clear();
         setDataVersion(v => v + 1);
         return count;
-    }, []);
+    }, [rowCount]);
 
     return { 
         isReady, 
@@ -418,7 +467,9 @@ export function useDataStream(): UseDataStreamReturn {
         errors, 
         pendingValidation, 
         isLoadingFile,
+        loadProgress,
         dataVersion,
+        currentProcess,
         goToIngestion,
         loadFile, 
         fetchRows, 

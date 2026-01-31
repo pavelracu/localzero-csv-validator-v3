@@ -1,4 +1,4 @@
-import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion, apply_bulk_action, update_schema, update_cell, find_replace_range } from '../wasm/localzero_core';
+import init, { load_dataset_with_progress, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion, apply_bulk_action, update_schema, update_cell, find_replace_range } from '../wasm/localzero_core';
 
 type WorkerMessage =
   | { type: 'INIT' }
@@ -44,19 +44,29 @@ function processValidationChunk() {
       errors.get(col).add(row);
   }
   
-  // 2. Measure & Log Chunk (log only every 20 chunks to avoid console spam on large files)
-  const duration = performance.now() - start;
+  // 2. Measure & report progress (rows/s for UI)
+  const now = performance.now();
+  const duration = now - start;
+  const rowsProcessed = Math.min(validationJob.currentStart + chunkSize, totalRows);
+  const elapsedSec = (now - validationJob.startTime) / 1000;
+  const rowsPerSec = elapsedSec > 0 ? Math.round(rowsProcessed / elapsedSec) : 0;
   const chunkIndex = Math.floor(validationJob.currentStart / chunkSize);
   if (duration > 10 && chunkIndex > 0 && chunkIndex % 20 === 0) {
-     console.log(`[Worker] Validation progress: ${validationJob.currentStart.toLocaleString()} / ${totalRows.toLocaleString()} rows`);
+     console.log(`[Worker] Validation progress: ${rowsProcessed.toLocaleString()} / ${totalRows.toLocaleString()} rows (${rowsPerSec.toLocaleString()}/s)`);
   }
 
-  // 3. Report progress
+  // 3. Report progress to main thread (for current process UI)
+  self.postMessage({
+    type: 'VALIDATION_PROGRESS',
+    payload: { rowsProcessed, totalRows, rowsPerSec },
+  });
+
+  // 4. Report errors (merge into UI state)
   if (errors.size > 0) {
      self.postMessage({ type: 'VALIDATION_UPDATE', payload: errors });
   }
 
-  // 4. Schedule next
+  // 5. Schedule next
   validationJob.currentStart += chunkSize;
   
   if (validationJob.currentStart < totalRows) {
@@ -87,8 +97,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'LOAD_FILE': {
-        const bytes = (e.data as any).payload;
-        const summary = load_dataset(bytes); 
+        const bytes = (e.data as any).payload as Uint8Array;
+        const progressCb = (bytesProcessed: number, totalBytes: number) => {
+          self.postMessage({
+            type: 'LOAD_PROGRESS',
+            payload: { bytesProcessed, totalBytes },
+          });
+        };
+        const summary = load_dataset_with_progress(bytes, progressCb);
         totalRows = summary.row_count;
         self.postMessage({ type: 'LOAD_COMPLETE', payload: summary });
         break;
@@ -216,6 +232,13 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           try {
             const count = find_replace_range(start, CHUNK, find, replace);
             totalReplaced += count;
+            const rowsProcessed = Math.min(start + CHUNK, totalRows);
+            const elapsedSec = (performance.now() - t0) / 1000;
+            const rowsPerSec = elapsedSec > 0 ? Math.round(rowsProcessed / elapsedSec) : 0;
+            self.postMessage({
+              type: 'FIND_REPLACE_PROGRESS',
+              payload: { rowsProcessed, totalRows, cellsReplaced: totalReplaced, rowsPerSec },
+            });
             start += CHUNK;
             setTimeout(doChunk, 0);
           } catch (err) {

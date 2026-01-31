@@ -147,3 +147,17 @@
 .vitals-mono {
   font-family: var(--font-mono);
 }
+
+/* Indeterminate progress bar (e.g. file load/parse) */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.progress-bar-indeterminate {
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}

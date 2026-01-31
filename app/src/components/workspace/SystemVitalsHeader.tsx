@@ -24,7 +24,6 @@ interface SystemVitalsHeaderProps {
   isSavingWorkspace?: boolean;
 }
 
-
 export function SystemVitalsHeader({
   isEngineReady,
   isSavingWorkspace = false,

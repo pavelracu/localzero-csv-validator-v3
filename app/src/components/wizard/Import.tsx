@@ -1,16 +1,23 @@
 import React, { useState, useCallback } from 'react';
-import { FileUp, Loader2 } from 'lucide-react';
+import { FileUp } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+
+export interface LoadProgress {
+  bytesProcessed: number;
+  totalBytes: number;
+}
 
 interface ImportProps {
   onFileSelect: (file: File) => Promise<void>;
   isReady: boolean;
   /** True while the file is being loaded and parsed locally (no upload). */
   isLoadingFile?: boolean;
+  /** During load: bytes scanned by Rust parser; drives the progress bar. */
+  loadProgress?: LoadProgress | null;
 }
 
-export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady, isLoadingFile = false }) => {
+export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady, isLoadingFile = false, loadProgress = null }) => {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -62,11 +69,41 @@ export const Import: React.FC<ImportProps> = ({ onFileSelect, isReady, isLoading
             ${!isReady ? 'opacity-60 pointer-events-none' : ''}
           `}
         >
-           <div className="bg-background p-4 rounded-full shadow-sm mb-4 ring-1 ring-border">
+           <div className="w-full max-w-sm mb-4 space-y-2">
               {isLoadingFile ? (
-                <Loader2 size={32} className="text-primary animate-spin" />
+                <>
+                  <div
+                    className="h-2.5 w-full overflow-hidden rounded-full bg-muted"
+                    role="progressbar"
+                    aria-valuenow={loadProgress && loadProgress.totalBytes > 0 ? Math.round((loadProgress.bytesProcessed / loadProgress.totalBytes) * 100) : 0}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Loading file"
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width] duration-150 ease-out"
+                      style={{
+                        width: loadProgress && loadProgress.totalBytes > 0
+                          ? `${Math.min(100, (loadProgress.bytesProcessed / loadProgress.totalBytes) * 100)}%`
+                          : '0%',
+                      }}
+                    />
+                  </div>
+                  {loadProgress && loadProgress.totalBytes > 0 && (
+                    <p className="text-xs text-muted-foreground tabular-nums text-center">
+                      {(loadProgress.bytesProcessed / 1024 / 1024).toFixed(1)} MB / {(loadProgress.totalBytes / 1024 / 1024).toFixed(1)} MB
+                      {loadProgress.bytesProcessed > 0 && (
+                        <span className="ml-2">
+                          ({Math.round((loadProgress.bytesProcessed / loadProgress.totalBytes) * 100)}%)
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </>
               ) : (
-                <FileUp size={32} className="text-primary" />
+                <div className="bg-background p-4 rounded-full shadow-sm ring-1 ring-border inline-flex">
+                  <FileUp size={32} className="text-primary" />
+                </div>
               )}
            </div>
            <h3 className="text-lg font-semibold text-foreground mb-1">
