@@ -21,6 +21,7 @@ interface VirtualizedTableProps {
   applySuggestion: (colIdx: number, suggestion: Suggestion) => Promise<void>;
   applyCorrection: (colIdx: number, strategy: 'clear' | 'revert') => Promise<void>;
   updateCell: (rowIdx: number, colIdx: number, value: string) => Promise<void>;
+  findReplaceAll?: (find: string, replace: string) => Promise<number>;
 }
 
 const CHUNK_SIZE = 50;
@@ -37,7 +38,8 @@ export function VirtualizedTable({
   getSuggestions,
   applySuggestion,
   applyCorrection,
-  updateCell
+  updateCell,
+  findReplaceAll
 }: VirtualizedTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   
@@ -275,6 +277,10 @@ export function VirtualizedTable({
               forceUpdate();
             })
           }
+          onFindReplace={findReplaceAll ? (find, replace) => findReplaceAll(find, replace).then((count) => {
+            forceUpdate();
+            return count;
+          }) : undefined}
           onClose={() => setFixingColumn(null)}
           open={fixingColumn !== null}
         />

@@ -1,4 +1,4 @@
-import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion, apply_bulk_action, update_schema, update_cell } from '../wasm/localzero_core';
+import init, { load_dataset, get_rows, validate_column, validate_chunk, apply_correction, get_suggestions, apply_suggestion, apply_bulk_action, update_schema, update_cell, find_replace_range } from '../wasm/localzero_core';
 
 type WorkerMessage =
   | { type: 'INIT' }
@@ -12,7 +12,8 @@ type WorkerMessage =
   | { type: 'GET_SUGGESTIONS'; colIdx: number; id: string }
   | { type: 'APPLY_SUGGESTION'; colIdx: number; suggestion: any; id: string }
   | { type: 'APPLY_BULK_ACTION'; colIdx: number; action: any; id: string }
-  | { type: 'UPDATE_CELL'; rowIdx: number; colIdx: number; value: string; id: string };
+  | { type: 'UPDATE_CELL'; rowIdx: number; colIdx: number; value: string; id: string }
+  | { type: 'FIND_REPLACE_ALL'; find: string; replace: string; id: string };
 
 let isWasmReady = false;
 let totalRows = 0;
@@ -43,10 +44,11 @@ function processValidationChunk() {
       errors.get(col).add(row);
   }
   
-  // 2. Measure & Log Chunk
+  // 2. Measure & Log Chunk (log only every 20 chunks to avoid console spam on large files)
   const duration = performance.now() - start;
-  if (duration > 10) { // Only log slow chunks to avoid spam
-     console.log(`[Worker] Chunk ${currentStart}-${currentStart+chunkSize}: ${duration.toFixed(2)}ms`);
+  const chunkIndex = Math.floor(validationJob.currentStart / chunkSize);
+  if (duration > 10 && chunkIndex > 0 && chunkIndex % 20 === 0) {
+     console.log(`[Worker] Validation progress: ${validationJob.currentStart.toLocaleString()} / ${totalRows.toLocaleString()} rows`);
   }
 
   // 3. Report progress
@@ -102,6 +104,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             chunkSize: 50000,
             startTime: performance.now()
         };
+        console.log(`[Worker] Starting validation: ${totalRows.toLocaleString()} rows`);
         processValidationChunk();
         break;
       }
@@ -138,8 +141,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'APPLY_CORRECTION': {
+        const t0 = performance.now();
         const { colIdx, strategy, id } = e.data as any;
         const count = apply_correction(colIdx, strategy);
+        const ms = Math.round(performance.now() - t0);
+        console.log(`[Worker] APPLY_CORRECTION colIdx=${colIdx} strategy=${strategy} count=${count} ms=${ms}`);
         self.postMessage({ type: 'CORRECTION_COMPLETE', id, payload: count });
         break;
       }
@@ -160,15 +166,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'APPLY_SUGGESTION': {
+        const t0 = performance.now();
         const { colIdx, suggestion, id } = e.data as any;
         const count = apply_suggestion(colIdx, suggestion);
+        const ms = Math.round(performance.now() - t0);
+        console.log(`[Worker] APPLY_SUGGESTION colIdx=${colIdx} count=${count} ms=${ms}`);
         self.postMessage({ type: 'SUGGESTION_COMPLETE', id, payload: count });
         break;
       }
       case 'APPLY_BULK_ACTION': {
+        const t0 = performance.now();
         const { colIdx, action, id } = e.data as any;
         try {
           const count = apply_bulk_action(colIdx, action);
+          const ms = Math.round(performance.now() - t0);
+          console.log(`[Worker] APPLY_BULK_ACTION colIdx=${colIdx} count=${count} ms=${ms}`);
           self.postMessage({ type: 'BULK_ACTION_COMPLETE', id, payload: count });
         } catch (err) {
           self.postMessage({ type: 'ERROR', payload: { id, error: String(err) } });
@@ -176,13 +188,41 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'UPDATE_CELL': {
+        const t0 = performance.now();
         const { rowIdx, colIdx, value, id } = e.data as any;
         try {
           update_cell(rowIdx, colIdx, value);
+          const ms = Math.round(performance.now() - t0);
+          console.log(`[Worker] UPDATE_CELL row=${rowIdx} col=${colIdx} ms=${ms}`);
           self.postMessage({ type: 'UPDATE_CELL_COMPLETE', id, payload: true });
         } catch (err) {
           self.postMessage({ type: 'ERROR', payload: { id, error: String(err) } });
         }
+        break;
+      }
+      case 'FIND_REPLACE_ALL': {
+        const t0 = performance.now();
+        const { find, replace, id } = e.data as any;
+        const CHUNK = 50000;
+        let start = 0;
+        let totalReplaced = 0;
+        const doChunk = () => {
+          if (start >= totalRows) {
+            const ms = Math.round(performance.now() - t0);
+            console.log(`[Worker] FIND_REPLACE_ALL replaced=${totalReplaced} ms=${ms}`);
+            self.postMessage({ type: 'FIND_REPLACE_ALL_COMPLETE', id, payload: totalReplaced });
+            return;
+          }
+          try {
+            const count = find_replace_range(start, CHUNK, find, replace);
+            totalReplaced += count;
+            start += CHUNK;
+            setTimeout(doChunk, 0);
+          } catch (err) {
+            self.postMessage({ type: 'ERROR', payload: { id, error: String(err) } });
+          }
+        };
+        doChunk();
         break;
       }
     }

@@ -27,6 +27,7 @@ export interface UseDataStreamReturn {
     applySuggestion: (colIdx: number, suggestion: Suggestion) => Promise<void>;
     updateCell: (rowIdx: number, colIdx: number, value: string) => Promise<void>;
     confirmSchema: () => Promise<void>;
+    findReplaceAll: (find: string, replace: string) => Promise<number>;
 }
 
 export function useDataStream(): UseDataStreamReturn {
@@ -61,7 +62,8 @@ export function useDataStream(): UseDataStreamReturn {
                 type === 'CORRECTION_COMPLETE' ||
                 type === 'GET_SUGGESTIONS_COMPLETE' ||
                 type === 'SUGGESTION_COMPLETE' ||
-                type === 'UPDATE_CELL_COMPLETE'
+                type === 'UPDATE_CELL_COMPLETE' ||
+                type === 'FIND_REPLACE_ALL_COMPLETE'
             ) {
                 const request = pendingRequests.current.get(id);
                 if (request) {
@@ -387,6 +389,26 @@ export function useDataStream(): UseDataStreamReturn {
         }
     }, [validateColumnsSafe]);
 
+    const findReplaceAll = useCallback(async (find: string, replace: string): Promise<number> => {
+        if (!workerRef.current) return 0;
+        const requestId = `findreplace_${Date.now()}`;
+        const t0 = performance.now();
+        const count = await new Promise<number>((resolve, reject) => {
+            pendingRequests.current.set(requestId, {
+                resolve: (payload: number) => {
+                    const ms = Math.round(performance.now() - t0);
+                    console.log(`[Find & Replace] replaced ${payload} cells in ${ms}ms`);
+                    resolve(payload);
+                },
+                reject,
+            });
+            workerRef.current!.postMessage({ type: 'FIND_REPLACE_ALL', find, replace, id: requestId });
+        });
+        rowCache.current.clear();
+        setDataVersion(v => v + 1);
+        return count;
+    }, []);
+
     return { 
         isReady, 
         stage, 
@@ -407,6 +429,7 @@ export function useDataStream(): UseDataStreamReturn {
         getSuggestions,
         applySuggestion,
         updateCell,
-        confirmSchema 
+        confirmSchema,
+        findReplaceAll,
     };
 }

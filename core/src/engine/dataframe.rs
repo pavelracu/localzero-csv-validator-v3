@@ -41,9 +41,12 @@ impl DataFrame {
             return None;
         }
 
-        // 3. Get from Raw Data
-        let start = self.row_indices[row_idx];
-        
+        // 3. Get from Raw Data (use get to avoid panic on bad index)
+        let start = match self.row_indices.get(row_idx) {
+            Some(&s) => s,
+            None => return None,
+        };
+
         // Slice from 'start' to the end. csv::Reader will read just the first record.
         let slice = &self.raw_data[start..];
         let cursor = Cursor::new(slice);
@@ -175,6 +178,58 @@ impl DataFrame {
             }
         }
         errors
+    }
+
+    /// Find/replace over a range of rows using one CSV Reader (streaming), like validate_range.
+    /// Returns the number of cells updated.
+    pub fn find_replace_range(&mut self, start_row: usize, row_limit: usize, find: &str, replace: &str) -> Result<u32, String> {
+        if start_row >= self.rows {
+            return Ok(0);
+        }
+        let cols = self.columns.len();
+        let end_row = std::cmp::min(start_row.saturating_add(row_limit), self.rows);
+
+        let start_byte = match self.row_indices.get(start_row) {
+            Some(&b) => b,
+            None => return Ok(0),
+        };
+        let slice = &self.raw_data[start_byte..];
+        let cursor = Cursor::new(slice);
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(cursor);
+
+        let mut record = StringRecord::new();
+        let mut updates: Vec<(usize, usize, String)> = Vec::new();
+
+        for i in 0..(end_row - start_row) {
+            let current_row = start_row + i;
+            if !reader.read_record(&mut record).unwrap_or(false) {
+                break;
+            }
+
+            for col_idx in 0..cols {
+                let val: String = if let Some(row_patches) = self.patches.get(&current_row) {
+                    if let Some(patched) = row_patches.get(&col_idx) {
+                        patched.clone()
+                    } else {
+                        record.get(col_idx).map(|s| s.to_string()).unwrap_or_default()
+                    }
+                } else {
+                    record.get(col_idx).map(|s| s.to_string()).unwrap_or_default()
+                };
+                let new_val = val.replace(find, replace);
+                if new_val != val {
+                    updates.push((current_row, col_idx, new_val));
+                }
+            }
+        }
+
+        let count = updates.len() as u32;
+        for (row, col, val) in updates {
+            self.update_cell(row, col, val)?;
+        }
+        Ok(count)
     }
 
     pub fn validate_column_fast(&self, col_idx: usize, col_type: ColumnType) -> Vec<usize> {

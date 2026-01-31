@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ColumnType, Suggestion, SuggestionReport } from '../../types';
-import { Eraser, RotateCcw, AlertTriangle, Wand2, ArrowRight, Loader2, RefreshCw } from 'lucide-react';
+import { Eraser, RotateCcw, AlertTriangle, Wand2, ArrowRight, Loader2, RefreshCw, ReplaceAll } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
 
 interface FixPanelProps {
     column: { name: string, type: ColumnType };
@@ -11,6 +13,7 @@ interface FixPanelProps {
     onCorrection: (strategy: 'clear' | 'revert') => void;
     onGetSuggestions: () => Promise<SuggestionReport[]>;
     onApplySuggestion: (suggestion: Suggestion) => Promise<void>;
+    onFindReplace?: (find: string, replace: string) => Promise<number>;
     onClose: () => void;
     open: boolean;
 }
@@ -67,12 +70,17 @@ export const FixPanel: React.FC<FixPanelProps> = ({
     onCorrection, 
     onGetSuggestions,
     onApplySuggestion,
+    onFindReplace,
     onClose, 
     open 
 }) => {
     const [suggestions, setSuggestions] = useState<SuggestionReport[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
+    const [findValue, setFindValue] = useState('');
+    const [replaceValue, setReplaceValue] = useState('');
+    const [findReplaceCount, setFindReplaceCount] = useState<number | null>(null);
+    const [isReplacing, setIsReplacing] = useState(false);
     const previousErrorCountRef = useRef<number>(errorCount);
 
     const refreshSuggestions = React.useCallback(() => {
@@ -121,6 +129,21 @@ export const FixPanel: React.FC<FixPanelProps> = ({
             }, 500);
         } finally {
             setApplyingIndex(null);
+        }
+    };
+
+    const handleFindReplace = async () => {
+        if (!onFindReplace || findValue === '') return;
+        setIsReplacing(true);
+        setFindReplaceCount(null);
+        try {
+            const count = await onFindReplace(findValue, replaceValue);
+            setFindReplaceCount(count);
+            refreshSuggestions();
+        } catch (e) {
+            console.error('Find & Replace failed', e);
+        } finally {
+            setIsReplacing(false);
         }
     };
 
@@ -178,6 +201,63 @@ export const FixPanel: React.FC<FixPanelProps> = ({
                         )}
                     </div>
                     
+                    <div className="relative">
+                        <Separator />
+                        <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                            <div className="mx-auto bg-background px-2 text-xs text-muted-foreground">Find & Replace</div>
+                        </div>
+                    </div>
+
+                    {onFindReplace && (
+                        <div className={`space-y-3 pt-2 ${isReplacing ? 'pointer-events-none opacity-60' : ''}`}>
+                            <div className="rounded-lg border p-3 space-y-3">
+                                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                                    <ReplaceAll size={16} className="text-muted-foreground" />
+                                    Replace across entire dataset
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="fix-find" className="text-xs text-muted-foreground">Find</Label>
+                                    <Input
+                                        id="fix-find"
+                                        placeholder="Exact value to find"
+                                        value={findValue}
+                                        onChange={(e) => setFindValue(e.target.value)}
+                                        className="font-mono text-sm"
+                                    />
+                                    <Label htmlFor="fix-replace" className="text-xs text-muted-foreground">Replace with</Label>
+                                    <Input
+                                        id="fix-replace"
+                                        placeholder="New value"
+                                        value={replaceValue}
+                                        onChange={(e) => setReplaceValue(e.target.value)}
+                                        className="font-mono text-sm"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        size="sm"
+                                        onClick={handleFindReplace}
+                                        disabled={isReplacing || findValue === ''}
+                                    >
+                                        {isReplacing ? (
+                                            <>
+                                                <Loader2 size={14} className="animate-spin mr-1.5" />
+                                                Replacing…
+                                            </>
+                                        ) : (
+                                            'Replace All'
+                                        )}
+                                    </Button>
+                                    {findReplaceCount !== null && (
+                                        <span className="text-xs text-muted-foreground">
+                                            Replaced {findReplaceCount} cell{findReplaceCount !== 1 ? 's' : ''}.
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="relative">
                         <Separator />
                         <div className="absolute inset-0 flex items-center" aria-hidden="true">

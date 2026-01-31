@@ -43,6 +43,7 @@ function App() {
     getRow,
     updateCell,
     confirmSchema: confirmSchemaBase,
+    findReplaceAll: findReplaceAllBase,
   } = useDataStream();
 
   const [selectedSchema, setSelectedSchema] = useState<SchemaDefinition | null>(() => getSchemaById(CUSTOM_SCHEMA_ID) ?? null);
@@ -152,6 +153,22 @@ function App() {
       await updateSchemaSnapshot(activeWorkspaceId, schemaSnapshot);
     }
   }, [confirmSchemaBase, activeWorkspaceId, schema]);
+
+  const findReplaceAll = useCallback(
+    async (find: string, replace: string) => {
+      const count = await findReplaceAllBase(find, replace);
+      if (activeWorkspaceId) {
+        await addTriageLogEntry(activeWorkspaceId, {
+          at: Date.now(),
+          colIdx: -1,
+          action: 'findReplaceAll',
+          suggestion: JSON.stringify({ find, replace, count }),
+        });
+      }
+      return count;
+    },
+    [findReplaceAllBase, activeWorkspaceId]
+  );
 
   const handleExportCSV = async () => {
     if (rowCount === 0 || schema.length === 0) return;
@@ -264,6 +281,7 @@ function App() {
             applySuggestion={applySuggestion}
             applyCorrection={applyCorrection}
             updateCell={updateCell}
+            findReplaceAll={findReplaceAll}
           />
         )}
 

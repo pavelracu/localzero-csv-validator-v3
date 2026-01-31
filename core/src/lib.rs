@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 use std::sync::Mutex;
+use std::time::Instant;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
@@ -119,8 +120,12 @@ pub fn get_suggestions(col_idx: usize) -> Result<JsValue, JsValue> {
 pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usize, JsValue> {
     let suggestion: mechanic::Suggestion = serde_wasm_bindgen::from_value(suggestion_json)?;
     let mut store = DATASET.lock().unwrap();
+    let start = Instant::now();
 
     if let Some(df) = store.as_mut() {
+        if col_idx >= df.columns.len() {
+            return Err(JsValue::from_str("Column index out of bounds"));
+        }
         let mut fixed_count = 0;
         let col_type = df.columns[col_idx].detected_type;
 
@@ -212,6 +217,8 @@ pub fn apply_suggestion(col_idx: usize, suggestion_json: JsValue) -> Result<usiz
                 }
             }
         }
+        let ms = start.elapsed().as_millis();
+        log(&format!("[apply_suggestion] col_idx={} rows={} count={} ms={}", col_idx, df.rows, fixed_count, ms));
         Ok(fixed_count)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
@@ -228,6 +235,7 @@ pub fn apply_bulk_action(col_idx: usize, action_json: JsValue) -> Result<usize, 
         .map_err(|e| JsValue::from_str(&format!("Invalid regex: {}", e)))?;
 
     let mut store = DATASET.lock().unwrap();
+    let start = Instant::now();
     if let Some(df) = store.as_mut() {
         if col_idx >= df.columns.len() {
             return Err(JsValue::from_str("Column index out of bounds"));
@@ -249,6 +257,8 @@ pub fn apply_bulk_action(col_idx: usize, action_json: JsValue) -> Result<usize, 
                 }
             }
         }
+        let ms = start.elapsed().as_millis();
+        log(&format!("[apply_bulk_action] col_idx={} rows={} count={} ms={}", col_idx, df.rows, changed_count, ms));
         Ok(changed_count)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
@@ -258,7 +268,8 @@ pub fn apply_bulk_action(col_idx: usize, action_json: JsValue) -> Result<usize, 
 #[wasm_bindgen]
 pub fn apply_correction(col_idx: usize, strategy: &str) -> Result<usize, JsValue> {
     let mut store = DATASET.lock().unwrap();
-    
+    let start = Instant::now();
+
     if let Some(df) = store.as_mut() {
         let mut fixed_count = 0;
         let col_type = df.columns[col_idx].detected_type;
@@ -303,6 +314,8 @@ pub fn apply_correction(col_idx: usize, strategy: &str) -> Result<usize, JsValue
             }
         }
 
+        let ms = start.elapsed().as_millis();
+        log(&format!("[apply_correction] col_idx={} strategy={} count={} ms={}", col_idx, strategy, fixed_count, ms));
         Ok(fixed_count)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
@@ -359,11 +372,72 @@ pub fn update_schema(schema_js: JsValue) -> Result<(), JsValue> {
 
 #[wasm_bindgen]
 pub fn update_cell(row_idx: usize, col_idx: usize, value: String) -> Result<(), JsValue> {
+    let start = Instant::now();
     let mut store = DATASET.lock().unwrap();
     if let Some(df) = store.as_mut() {
         df.update_cell(row_idx, col_idx, value)
             .map_err(|e| JsValue::from_str(&e))?;
+        let ms = start.elapsed().as_millis();
+        log(&format!("[update_cell] row={} col={} ms={}", row_idx, col_idx, ms));
         Ok(())
+    } else {
+        Err(JsValue::from_str("No dataset loaded"))
+    }
+}
+
+/// Process find/replace for a range of rows only. Used by the worker to chunk work and avoid
+/// long-running single calls that can hit "unreachable" (stack/timeout) on large datasets.
+/// Uses one CSV Reader per chunk (streaming), like validate_range, instead of one Reader per row.
+#[wasm_bindgen]
+pub fn find_replace_range(start_row: usize, row_limit: usize, find: &str, replace: &str) -> Result<u32, JsValue> {
+    let mut store = DATASET.lock().unwrap();
+    if let Some(df) = store.as_mut() {
+        df.find_replace_range(start_row, row_limit, find, replace)
+            .map_err(|e| JsValue::from_str(&e))
+    } else {
+        Err(JsValue::from_str("No dataset loaded"))
+    }
+}
+
+#[wasm_bindgen]
+pub fn find_replace_all(find: &str, replace: &str) -> Result<u32, JsValue> {
+    let find = find.to_string();
+    let replace = replace.to_string();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        find_replace_all_inner(&find, &replace)
+    }));
+    match result {
+        Ok(Ok(count)) => Ok(count),
+        Ok(Err(e)) => Err(e),
+        Err(panic_payload) => {
+            let msg = format!("find_replace_all panic: {:?}", panic_payload);
+            log(&msg);
+            Err(JsValue::from_str(&msg))
+        }
+    }
+}
+
+fn find_replace_all_inner(find: &str, replace: &str) -> Result<u32, JsValue> {
+    let mut store = DATASET.lock().unwrap();
+    if let Some(df) = store.as_mut() {
+        let start = Instant::now();
+        let rows = df.rows;
+        let cols = df.columns.len();
+        let total_cells = rows.checked_mul(cols).unwrap_or(0);
+        let count = df.find_replace_range(0, rows, find, replace)
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        let ms = start.elapsed().as_millis();
+        let cells_per_ms = if ms > 0 && total_cells > 0 {
+            (total_cells as f64) / (ms as f64)
+        } else {
+            0.0
+        };
+        log(&format!(
+            "[find_replace_all] rows={} cols={} cells={} replaced={} ms={} cells_per_ms={:.1}",
+            rows, cols, total_cells, count, ms, cells_per_ms
+        ));
+        Ok(count)
     } else {
         Err(JsValue::from_str("No dataset loaded"))
     }

@@ -61,10 +61,13 @@ pub fn normalize_email(s: &str) -> Option<String> {
         return None;
     }
     let normalized = format!("{}@{}", local, domain);
-    if email_address::EmailAddress::from_str(&normalized).is_ok() {
-        Some(normalized)
-    } else {
-        None
+    // Guard against email_address crate panicking on edge-case inputs (e.g. in WASM).
+    let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        email_address::EmailAddress::from_str(&normalized).is_ok()
+    }));
+    match ok {
+        Ok(true) => Some(normalized),
+        _ => None,
     }
 }
 
