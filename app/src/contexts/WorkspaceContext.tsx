@@ -10,10 +10,7 @@ import type { FileMetadata } from '../types';
 export type PrivacyShieldStatus = 'inactive' | 'local-only';
 
 /**
- * Workspace context holds only active workspace id and metadata.
- * triageLog is NOT stored here — it lives in IndexedDB only. Query it via
- * getWorkspace(activeWorkspaceId) or useTriageLog(activeWorkspaceId) when
- * the Triage/Export view needs it, to avoid React state bloat from large logs.
+ * Workspace context holds active workspace id and file metadata only (in-memory).
  */
 interface WorkspaceContextValue {
   activeWorkspaceId: string | null;

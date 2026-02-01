@@ -1,6 +1,8 @@
 # Codebase Cleanup Plan
 
-**Scope:** App (`app/src`). Identifies **unused** and **duplicated** components/elements and proposes a cleanup order.
+**Scope:** App (`app/src`) and Core (`core/src`). Identifies **unused** and **duplicated** components/elements and proposes a cleanup order.
+
+**Status (latest pass):** ComplianceStepper removed. Orphaned Rust `core/src/rules/` removed. IssuesPanel is **in use** (App.tsx). auditGenerator, useTriageLog, listWorkspaces, updateFileMetadata, setRejectedRows kept and documented as reserved for future use.
 
 ---
 
@@ -9,17 +11,17 @@
 | Item | Location | Notes |
 |------|----------|--------|
 | **StepIndicator** | `components/layout/StepIndicator.tsx` | **Removed.** Never imported; duplicate of ComplianceStepper. |
-| **IssuesPanel** | `components/editor/IssuesPanel.tsx` | Never imported. Renders a panel listing columns with errors and "Clear Cells" / "Revert Column" per column. **Overlaps with FixPanel** (per-column sheet used from `VirtualizedTable`). FixPanel is the one in use. |
-| **useTriageLog** | `hooks/useTriageLog.ts` | Exported but **never called**. Only referenced in a comment in `WorkspaceContext.tsx`. Intended for Triage/Export view to read triage log from IndexedDB without storing it in React state. |
-| **dropdown-menu** | `components/ui/dropdown-menu.tsx` | Full shadcn dropdown menu (Root, Trigger, Content, Item, etc.). **Never imported** anywhere. Likely added for future UI (e.g. column menu, export menu). |
-| **generateAuditSummary** | `lib/auditGenerator.ts` | Exported but **never imported**. Added for Sprint 2 audit/export; keep for when ZIP export or audit report is wired. |
-| **setRejectedRows** | `lib/workspaceDb.ts` | Exported but **never called**. Sprint 2 prep; keep and wire when "Permanently Reject" UI exists. |
+| **ComplianceStepper** | `components/workspace/ComplianceStepper.tsx` | **Removed.** Never imported; redundant with Sidebar as pipeline indicator. |
+| **IssuesPanel** | `components/editor/IssuesPanel.tsx` | **In use.** Imported and rendered in `App.tsx`. Renders columns with errors and "Clear Cells" / "Revert Column"; used alongside FixPanel. |
+| **useTriageLog** | `hooks/useTriageLog.ts` | Exported but **never called**. Kept and documented for Triage/Export view; wire when building that view. |
+| **dropdown-menu** | `components/ui/dropdown-menu.tsx` | **Removed.** Never imported. |
+| **generateAuditSummary** | `lib/auditGenerator.ts` | Exported but **never imported**. Kept and documented for future audit/export. |
+| **listWorkspaces**, **updateFileMetadata**, **setRejectedRows** | `lib/workspaceDb.ts` | Exported but **never called**. Kept and documented for future workspace list / file metadata / "Permanently Reject" UI. |
 
 **Recommendation**
 
-- **Remove (dead code):** `StepIndicator.tsx`, `IssuesPanel.tsx`. They duplicate or overlap with `ComplianceStepper` and `FixPanel` and are not referenced.
-- **Keep but document:** `useTriageLog` — either wire it where triage/export needs the log, or remove if that flow will use `getWorkspace(activeWorkspaceId).triageLog` directly.
-- **Keep (future use):** `dropdown-menu.tsx` (if a menu is planned), `auditGenerator.ts`, `setRejectedRows`.
+- **In use (do not remove):** IssuesPanel, FixPanel, VirtualizedTable.
+- **Keep but document:** `useTriageLog`, `auditGenerator.ts`, `listWorkspaces`, `updateFileMetadata`, `setRejectedRows` — reserved for future features.
 
 ---
 
@@ -27,7 +29,7 @@
 
 ### 2.1 Redundant pipeline UI (header stepper vs sidebar) ✅ Done
 
-**ComplianceStepper** (header: 1 Ingest, 2 Standard, 3 Triage, 4 Export) duplicated the **Sidebar** “Compliance Pipeline” (01 UPLOAD, 02 MAP & TRIAGE, 03 VALIDATE). **Removed** ComplianceStepper from `AppHeader` and deleted `ComplianceStepper.tsx`. The Sidebar is now the single pipeline progress indicator; the header keeps only “LocalZero” + current stage label + actions (Validate, Export).
+**ComplianceStepper** (header: 1 Ingest, 2 Standard, 3 Triage, 4 Export) duplicated the **Sidebar** “Compliance Pipeline” (01 UPLOAD, 02 MAP & TRIAGE, 03 VALIDATE). **Removed** `ComplianceStepper.tsx` (was never imported). The Sidebar is now the single pipeline progress indicator; the header keeps only “LocalZero” + current stage label + actions (Validate, Export).
 
 ### 2.2 Stage → step index / labels
 
@@ -63,7 +65,9 @@ Used in: `Layout.tsx` (persisting overlay), `App.tsx` (PROCESSING), `AppHeader.t
 
 1. **Delete `app/src/components/layout/StepIndicator.tsx`** — **Done.** No references.
 
-2. **Delete `app/src/components/editor/IssuesPanel.tsx`** — **Done.** No references.
+2. **Delete `app/src/components/workspace/ComplianceStepper.tsx`** — **Done.** Not imported anywhere; redundant with Sidebar.
+
+3. **Delete `core/src/rules/`** (mod.rs, ast.rs, evaluator.rs) — **Done.** Orphaned; not included in crate (`lib.rs` has no `mod rules`).
 
 ### Phase 2: Decide on useTriageLog and dropdown-menu ✅ Done
 
@@ -81,9 +85,11 @@ Used in: `Layout.tsx` (persisting overlay), `App.tsx` (PROCESSING), `AppHeader.t
 
 6. **(Optional)** Add a shared `Spinner` (or `Loader`) component and replace repeated Loader2+animate-spin usages.
 
-### Phase 4: Leave as-is (document only)
+### Phase 4: Leave as-is (document only) ✅ Done
 
-7. **auditGenerator.ts** and **setRejectedRows**: Keep; wire when implementing audit report and “Permanently Reject” in the UI.
+7. **auditGenerator.ts**, **useTriageLog**, **listWorkspaces**, **updateFileMetadata**, **setRejectedRows**: Kept; file-level or JSDoc comments added. Wire when implementing audit report, Triage/Export view, workspace list, file metadata, and “Permanently Reject” UI.
+
+**WASM surface:** `find_replace_all` and `load_dataset` (sync) are exposed from core but not called from the app (worker uses chunked `find_replace_range` and `load_dataset_with_progress`). Left as-is for optional external/sync use.
 
 ---
 
@@ -91,10 +97,10 @@ Used in: `Layout.tsx` (persisting overlay), `App.tsx` (PROCESSING), `AppHeader.t
 
 | Category | Items | Action |
 |----------|--------|--------|
-| **Unused – remove** | StepIndicator, IssuesPanel, ComplianceStepper, dropdown-menu | Deleted; redundant with Sidebar / FixPanel. |
-| **Unused – decide** | useTriageLog | Kept for Triage/Export view. |
-| **Unused – keep for now** | generateAuditSummary, setRejectedRows | Leave; wire in Sprint 2. |
+| **Dead – removed** | StepIndicator, ComplianceStepper, dropdown-menu, core/src/rules/ | Deleted. |
+| **In use** | IssuesPanel, FixPanel, VirtualizedTable | Do not remove. |
+| **Unused – keep and document** | auditGenerator, useTriageLog, listWorkspaces, updateFileMetadata, setRejectedRows | Documented; wire when building those features. |
+| **Unused WASM** | find_replace_all, load_dataset (sync) | Left as-is; optional minimal-API cleanup later. |
 | **Duplication** | Stage→index and stage labels | Centralize in stageHelpers (or similar). |
 | **Duplication (minor)** | Loader2 + animate-spin | Optional: shared Spinner component. |
 
-Applying Phase 1 gives immediate benefit (less dead code, fewer duplicate concepts). Phase 2–3 can be done in follow-up PRs.

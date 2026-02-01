@@ -8,7 +8,6 @@ import { SchemaSelect } from './components/wizard/SchemaSelect';
 import { Loader2 } from 'lucide-react';
 import { Layout } from './components/workspace/Layout';
 import { SchemaStorage } from './lib/storage';
-import { putWorkspace, addTriageLogEntry, updateSchemaSnapshot } from './lib/workspaceDb';
 import { useWorkspace } from './contexts/WorkspaceContext';
 import { SchemaPreset, type ColumnType, type Suggestion } from './types';
 import { CUSTOM_SCHEMA_ID, getSchemaById } from './lib/schemas';
@@ -26,7 +25,6 @@ function App() {
     setFileMetadata,
     setPrivacyShieldStatus,
     bumpWorkspaceListVersion,
-    activeWorkspaceId,
     fileMetadata,
   } = useWorkspace();
 
@@ -98,19 +96,8 @@ function App() {
     async (file: File) => {
       try {
         await loadFile(file);
-        setIsSavingWorkspace(true);
-        setIsPersisting(true);
         const id = crypto.randomUUID();
-        const now = Date.now();
         const fileMetadata = { name: file.name, size: file.size };
-        await putWorkspace({
-          id,
-          createdAt: now,
-          updatedAt: now,
-          fileMetadata,
-          schemaSnapshot: {},
-          triageLog: [],
-        });
         setActiveWorkspace(id);
         setFileMetadata(fileMetadata);
         setPrivacyShieldStatus('local-only');
@@ -118,9 +105,6 @@ function App() {
       } catch (err) {
         console.error('Workspace initialization failed', err);
         throw err;
-      } finally {
-        setIsSavingWorkspace(false);
-        setIsPersisting(false);
       }
     },
     [loadFile, setActiveWorkspace, setFileMetadata, setPrivacyShieldStatus, bumpWorkspaceListVersion]
@@ -129,61 +113,26 @@ function App() {
   const applyCorrection = useCallback(
     async (colIdx: number, strategy: string) => {
       await applyCorrectionBase(colIdx, strategy);
-      if (activeWorkspaceId) {
-        await addTriageLogEntry(activeWorkspaceId, {
-          at: Date.now(),
-          colIdx,
-          action: 'applyCorrection',
-          suggestion: strategy,
-        });
-      }
     },
-    [applyCorrectionBase, activeWorkspaceId]
+    [applyCorrectionBase]
   );
 
   const applySuggestion = useCallback(
     async (colIdx: number, suggestion: Suggestion) => {
       await applySuggestionBase(colIdx, suggestion);
-      if (activeWorkspaceId) {
-        await addTriageLogEntry(activeWorkspaceId, {
-          at: Date.now(),
-          colIdx,
-          action: 'applySuggestion',
-          suggestion: JSON.stringify(suggestion),
-        });
-      }
     },
-    [applySuggestionBase, activeWorkspaceId]
+    [applySuggestionBase]
   );
 
   const confirmSchema = useCallback(async () => {
     await confirmSchemaBase();
-    if (activeWorkspaceId) {
-      const schemaSnapshot = schema.reduce(
-        (acc, col) => {
-          acc[col.name] = col.detected_type;
-          return acc;
-        },
-        {} as Record<string, ColumnType>
-      );
-      await updateSchemaSnapshot(activeWorkspaceId, schemaSnapshot);
-    }
-  }, [confirmSchemaBase, activeWorkspaceId, schema]);
+  }, [confirmSchemaBase]);
 
   const findReplaceAll = useCallback(
     async (find: string, replace: string) => {
-      const count = await findReplaceAllBase(find, replace);
-      if (activeWorkspaceId) {
-        await addTriageLogEntry(activeWorkspaceId, {
-          at: Date.now(),
-          colIdx: -1,
-          action: 'findReplaceAll',
-          suggestion: JSON.stringify({ find, replace, count }),
-        });
-      }
-      return count;
+      return findReplaceAllBase(find, replace);
     },
-    [findReplaceAllBase, activeWorkspaceId]
+    [findReplaceAllBase]
   );
 
   const handleExportCSV = async () => {

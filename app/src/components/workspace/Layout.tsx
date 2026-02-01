@@ -14,9 +14,9 @@ export interface LayoutProps {
   errorCount?: number;
   /** Schema for Audit Log column labels (optional). */
   schema?: ColumnSchema[];
-  /** True while workspace metadata is being persisted to IndexedDB after file load. */
+  /** True while workspace metadata is being saved after file load (legacy; currently unused). */
   isSavingWorkspace?: boolean;
-  /** True while putWorkspace is running; shows "Securing Local Workspace..." overlay. */
+  /** True while persisting; shows "Securing Local Workspace..." overlay (legacy; currently unused). */
   isPersisting?: boolean;
   /** Header: validation and export */
   pendingValidationCount?: number;
