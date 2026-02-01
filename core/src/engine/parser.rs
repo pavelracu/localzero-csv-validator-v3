@@ -5,7 +5,8 @@ use csv::ReaderBuilder;
 
 /// Progress report: call every PROGRESS_INTERVAL bytes during byte scan.
 /// Larger interval = fewer JS callbacks and less parse overhead (WASM↔JS is costly).
-const PROGRESS_INTERVAL: usize = 1_048_576; // 1MB
+/// 8MB keeps progress bar smooth (~40–75 updates for 300–600MB) while avoiding 3s+ slowdown.
+const PROGRESS_INTERVAL: usize = 8_388_608; // 8MB
 
 /// Parse raw bytes into a DataFrame and infer types using a lazy scan approach.
 /// If `progress` is Some, it is called during the byte scan with (bytes_scanned, total_bytes).

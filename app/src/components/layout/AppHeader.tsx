@@ -17,6 +17,8 @@ function getStepIndex(stage: AppStage): number {
 
 interface AppHeaderProps {
   stage: AppStage;
+  /** Total validation error count (cell-level). Shown in TRIAGE when > 0. */
+  errorCount?: number;
   pendingValidationCount: number;
   isValidating: boolean;
   onRunValidation: () => Promise<void>;
@@ -26,6 +28,7 @@ interface AppHeaderProps {
 
 export const AppHeader = ({
   stage,
+  errorCount = 0,
   pendingValidationCount,
   isValidating,
   onRunValidation,
@@ -45,7 +48,11 @@ export const AppHeader = ({
             <h1 className="text-base font-bold text-foreground font-mono tracking-tight">
               LocalZero
             </h1>
-            
+            {stage === 'STUDIO' && errorCount > 0 && (
+              <span className="text-xs font-mono text-destructive font-medium ml-1" title="Total validation errors">
+                {errorCount.toLocaleString()} errors
+              </span>
+            )}
           </div>
         </div>
         <nav className="hidden md:flex items-center gap-1 text-xs font-mono" aria-label="Pipeline steps">

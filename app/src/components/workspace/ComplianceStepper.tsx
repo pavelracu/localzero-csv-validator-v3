@@ -11,7 +11,7 @@ const STEPS = [
 
 function stageToStepIndex(stage: AppStage): number {
   switch (stage) {
-    case 'IMPORT':
+    case 'INGESTION':
       return 0;
     case 'SCHEMA':
       return 1;

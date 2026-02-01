@@ -31,6 +31,7 @@ export function Layout({
   isReady,
   stage,
   rowCount,
+  errorCount = 0,
   schema,
   isSavingWorkspace = false,
   isPersisting = false,
@@ -47,6 +48,7 @@ export function Layout({
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-background">
       <AppHeader
         stage={stage}
+        errorCount={errorCount}
         pendingValidationCount={pendingValidationCount}
         isValidating={isValidating}
         onRunValidation={onRunValidation ?? (async () => {})}

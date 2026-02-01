@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDataStream } from './hooks/useDataStream';
 import { VirtualizedTable } from './components/grid/VirtualizedTable';
+import { IssuesPanel } from './components/editor/IssuesPanel';
 import { Import } from './components/wizard/Import';
 import { Mapping } from './components/wizard/Mapping';
 import { SchemaSelect } from './components/wizard/SchemaSelect';
@@ -61,6 +62,13 @@ function App() {
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [isPersisting, setIsPersisting] = useState(false);
   const [schemaSamples, setSchemaSamples] = useState<Record<number, string[]>>({});
+  const [fixingColumn, setFixingColumn] = useState<number | null>(null);
+
+  const totalErrorCount = useMemo(() => {
+    let sum = 0;
+    errors.forEach((set) => { sum += set.size; });
+    return sum;
+  }, [errors]);
 
   useEffect(() => {
     if ((stage === 'INGESTION' || stage === 'SCHEMA') && rowCount > 0) {
@@ -222,7 +230,7 @@ function App() {
       isReady={isReady}
       stage={stage}
       rowCount={rowCount}
-      errorCount={errors.size}
+      errorCount={totalErrorCount}
       schema={schema}
       isSavingWorkspace={isSavingWorkspace}
       isPersisting={isPersisting}
@@ -277,21 +285,35 @@ function App() {
         )}
 
         {stage === 'STUDIO' && (
-          <VirtualizedTable
-            rowCount={rowCount}
-            schema={schema}
-            errors={errors}
-            pendingValidation={pendingValidation}
-            dataVersion={dataVersion}
-            getRow={getRow}
-            fetchRows={fetchRows}
-            onTypeChange={updateColumnType}
-            getSuggestions={getSuggestions}
-            applySuggestion={applySuggestion}
-            applyCorrection={applyCorrection}
-            updateCell={updateCell}
-            findReplaceAll={findReplaceAll}
-          />
+          <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
+            <IssuesPanel
+              schema={schema}
+              errors={errors}
+              getSuggestions={getSuggestions}
+              applySuggestion={applySuggestion}
+              onOpenColumnFix={setFixingColumn}
+            />
+            <div className="flex-1 min-w-0 min-h-0 relative">
+              <VirtualizedTable
+              rowCount={rowCount}
+              schema={schema}
+              errors={errors}
+              pendingValidation={pendingValidation}
+              dataVersion={dataVersion}
+              getRow={getRow}
+              fetchRows={fetchRows}
+              onTypeChange={updateColumnType}
+              getSuggestions={getSuggestions}
+              applySuggestion={applySuggestion}
+              applyCorrection={applyCorrection}
+              updateCell={updateCell}
+              findReplaceAll={findReplaceAll}
+              fixingColumn={fixingColumn}
+              onOpenFixPanel={setFixingColumn}
+              onCloseFixPanel={() => setFixingColumn(null)}
+            />
+            </div>
+          </div>
         )}
 
         {stage === 'PROCESSING' && (

@@ -98,11 +98,23 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       }
       case 'LOAD_FILE': {
         const bytes = (e.data as any).payload as Uint8Array;
+        const PROGRESS_THROTTLE_MS = 80;
+        const PROGRESS_THROTTLE_PCT = 0.02;
+        let lastProgressAt = 0;
+        let lastPostedBytes = 0;
         const progressCb = (bytesProcessed: number, totalBytes: number) => {
-          self.postMessage({
-            type: 'LOAD_PROGRESS',
-            payload: { bytesProcessed, totalBytes },
-          });
+          const now = performance.now();
+          const pctDelta = totalBytes > 0 ? (bytesProcessed - lastPostedBytes) / totalBytes : 1;
+          const timeDelta = now - lastProgressAt;
+          const isComplete = bytesProcessed >= totalBytes;
+          if (isComplete || timeDelta >= PROGRESS_THROTTLE_MS || pctDelta >= PROGRESS_THROTTLE_PCT) {
+            lastProgressAt = now;
+            lastPostedBytes = bytesProcessed;
+            self.postMessage({
+              type: 'LOAD_PROGRESS',
+              payload: { bytesProcessed, totalBytes },
+            });
+          }
         };
         const summary = load_dataset_with_progress(bytes, progressCb);
         totalRows = summary.row_count;

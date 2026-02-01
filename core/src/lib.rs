@@ -62,7 +62,7 @@ pub fn load_dataset(data: &[u8]) -> Result<JsValue, JsValue> {
 }
 
 /// Load and parse CSV, calling `progress_fn(bytes_processed, total_bytes)` during the byte scan.
-/// Use this to drive a progress bar. Progress is reported every ~64KB.
+/// Use this to drive a progress bar. Progress is reported every ~8MB to keep WASM↔JS cost low.
 #[wasm_bindgen]
 pub fn load_dataset_with_progress(data: &[u8], progress_fn: &js_sys::Function) -> Result<JsValue, JsValue> {
     log(&format!("🚀 Parsing {} bytes (with progress)...", data.len()));

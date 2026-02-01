@@ -22,6 +22,10 @@ interface VirtualizedTableProps {
   applyCorrection: (colIdx: number, strategy: 'clear' | 'revert') => Promise<void>;
   updateCell: (rowIdx: number, colIdx: number, value: string) => Promise<void>;
   findReplaceAll?: (find: string, replace: string) => Promise<number>;
+  /** Fix panel: which column is open (null = closed). Controlled by parent so IssuesPanel can open it. */
+  fixingColumn: number | null;
+  onOpenFixPanel: (colIdx: number) => void;
+  onCloseFixPanel: () => void;
 }
 
 const CHUNK_SIZE = 50;
@@ -39,12 +43,13 @@ export function VirtualizedTable({
   applySuggestion,
   applyCorrection,
   updateCell,
-  findReplaceAll
+  findReplaceAll,
+  fixingColumn,
+  onOpenFixPanel,
+  onCloseFixPanel,
 }: VirtualizedTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   
-  // Minimal state to toggle the sidebar
-  const [fixingColumn, setFixingColumn] = useState<number | null>(null);
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [filterMode, setFilterMode] = useState<'all' | 'errors'>('all');
 
@@ -186,7 +191,7 @@ export function VirtualizedTable({
                     isPending={pendingValidation.has(i)}
                     errorCount={errors.get(i)?.size || 0}
                     onTypeChange={(t) => onTypeChange(i, t)}
-                    onSelectFix={() => setFixingColumn(i)}
+                    onSelectFix={() => onOpenFixPanel(i)}
                  />
                </div>
              ))}
@@ -281,7 +286,7 @@ export function VirtualizedTable({
             forceUpdate();
             return count;
           }) : undefined}
-          onClose={() => setFixingColumn(null)}
+          onClose={onCloseFixPanel}
           open={fixingColumn !== null}
         />
       )}

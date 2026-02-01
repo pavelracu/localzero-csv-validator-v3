@@ -43,6 +43,23 @@ export interface SuggestionReport {
     example_after: string;
 }
 
+// --- Issue-type grouping (TRIAGE / Issues panel) ---
+
+export interface IssueColumnInfo {
+    colIdx: number;
+    name: string;
+    errorCount: number;
+}
+
+export interface IssueGroup {
+    /** Human-readable issue type, e.g. "Invalid US phone format" */
+    issueKind: string;
+    /** Column type used for grouping (e.g. PhoneUS, Email) */
+    columnType: ColumnType;
+    columns: IssueColumnInfo[];
+    totalErrors: number;
+}
+
 // --- Current process (validate & fix phase: loading, validating, applying fix, etc.) ---
 
 export type ProcessPhase =
